@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   offline:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     timeout-minutes: 15
     env:
       LINE_MCP_DISABLE_NATIVE: '1'
