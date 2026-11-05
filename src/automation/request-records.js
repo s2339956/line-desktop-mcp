@@ -4,11 +4,11 @@ import fs from 'node:fs/promises';
 import { AutomationError } from './automation-error.js';
 import { readPrivateJSON, writePrivateJSON, privateDirectory, syncDirectory } from './private-json.js';
 
-const terminal = new Set(['succeeded', 'failed', 'user_reported_submitted', 'abandoned']);
+const terminal = new Set(['succeeded', 'partial', 'failed', 'user_reported_submitted', 'abandoned']);
 const states = new Set([...terminal, 'started', 'uncertain']);
 const allowedResult = new Set(['success', 'autoSent', 'chatVerified', 'selectedFileVerified',
   'sourceSha256', 'imageSha256', 'width', 'height', 'temporaryFileRetained', 'receipt',
-  'completedCount', 'totalCount', 'items']);
+  'completedCount', 'totalCount', 'items', 'partial', 'failedIndex', 'causeCode', 'fileSha256', 'byteCount']);
 
 export function validateRequestId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(value)) {
@@ -17,12 +17,12 @@ export function validateRequestId(value) {
   return value;
 }
 
-function safeResult(result) {
+export function sanitizeReceipt(result) {
   const selected = Object.fromEntries(Object.entries(result).filter(([key]) => allowedResult.has(key)));
   if (selected.receipt) selected.receipt = {
     status: selected.receipt.status, observedAt: selected.receipt.observedAt, deliveryConfirmed: false,
   };
-  if (selected.items) selected.items = selected.items.map(safeResult);
+  if (selected.items) selected.items = selected.items.map(sanitizeReceipt);
   return selected;
 }
 
@@ -47,12 +47,15 @@ export class RequestReceipts {
     return record;
   }
 
-  async status(requestId) {
+  async status(requestId, journalPath) {
     const record = await this.read(requestId);
     if (!record) return { found: false };
+    const journal = journalPath ? await readPrivateJSON(journalPath) : null;
+    const ownJournalPending = journal?.value.operationId === record.operationId && journal?.value.actionHash === record.actionHash;
     return { found: true, operationId: record.operationId, state: record.state,
-      terminal: terminal.has(record.state), needsRecovery: !terminal.has(record.state),
-      ...(record.result ? { result: safeResult(record.result) } : {}) };
+      terminal: terminal.has(record.state), needsRecovery: !terminal.has(record.state) || ownJournalPending,
+      blockingJournal: journal !== null,
+      ...(record.result ? { result: sanitizeReceipt(record.result) } : {}) };
   }
 
   async run(requestId, actionHash, work) {
@@ -60,7 +63,7 @@ export class RequestReceipts {
     const old = await this.read(requestId);
     if (old) {
       if (old.actionHash !== actionHash) throw new AutomationError('REQUEST_CONFLICT', '相同requestId不可更換操作內容');
-      if (old.state === 'succeeded') return { ...safeResult(old.result), replayed: true };
+      if (old.state === 'succeeded' || old.state === 'partial') return { ...sanitizeReceipt(old.result), replayed: true };
       throw new AutomationError(terminal.has(old.state) ? 'REQUEST_FINISHED' : 'OPERATION_UNCERTAIN',
         '此請求已執行或停止；不會再次傳送，請先查詢操作狀態', {
           operationId: old.operationId, needsRecovery: !terminal.has(old.state),
@@ -69,10 +72,14 @@ export class RequestReceipts {
     const record = { schemaVersion: 1, actionHash, operationId: crypto.randomUUID(),
       createdAt: new Date().toISOString(), state: 'started' };
     await writePrivateJSON(this.file(requestId), record);
-    let committed = false;
+    let committed = false, progress;
     try {
-      const result = await work({ operationId: record.operationId, commit: async result => {
-        await writePrivateJSON(this.file(requestId), { ...record, state: 'succeeded', result: safeResult(result) });
+      const result = await work({ operationId: record.operationId, checkpoint: async result => {
+        progress = sanitizeReceipt(result);
+        await writePrivateJSON(this.file(requestId), { ...record, result: progress });
+      }, commit: async result => {
+        await writePrivateJSON(this.file(requestId), { ...record,
+          state: result.partial === true ? 'partial' : 'succeeded', result: sanitizeReceipt(result) });
         committed = true;
       } });
       if (!committed) throw new AutomationError('OPERATION_UNCERTAIN', '操作未持久化完成回條');
@@ -80,6 +87,7 @@ export class RequestReceipts {
     } catch (error) {
       if (!committed) await writePrivateJSON(this.file(requestId), {
         ...record, state: error.code === 'OPERATION_UNCERTAIN' ? 'uncertain' : 'failed',
+        ...(progress ? { result: progress } : {}),
       }).catch(() => {});
       throw error;
     }

@@ -31,6 +31,24 @@ export const desktopTools = [
     annotations: { readOnlyHint: false, idempotentHint: true },
   },
   {
+    name: 'line_send_images',
+    description: '將1至10張PNG/JPEG按順序直接送到目前已開啟且核對的對話，不增加確認關卡。每張20MiB、整批100MiB；先全部驗檔，任何不明結果立即停止。requestId必填，重複請求不重送。',
+    inputSchema: schema({ chatName: name, requestId, images: {
+      type: 'array', minItems: 1, maxItems: 10,
+      items: schema({ imagePath: { type: 'string' }, imageSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, ['imagePath', 'imageSha256']),
+    } }, ['chatName', 'requestId', 'images']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: 'line_send_files',
+    description: '將1至10個本機一般檔案按順序直接傳到目前已開啟且核對的對話；總計100MiB，保留原檔名與原始位元組，不執行檔案、不轉圖、不加說明文字。requestId必填，失敗或不明時不重送。',
+    inputSchema: schema({ chatName: name, requestId, files: {
+      type: 'array', minItems: 1, maxItems: 10,
+      items: schema({ filePath: { type: 'string' }, fileSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, ['filePath', 'fileSha256']),
+    } }, ['chatName', 'requestId', 'files']),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
     name: 'line_send_image',
     description: '將單張 PNG/JPEG 選入目前已開啟且標題核對相符的 LINE 對話，不搜尋或換對話。預設 autoSend:false，只停在已核對的附件選擇器；autoSend:true 會按一次打開，可能立即送出，僅限使用者已明確授權。圖片須綁定 SHA256；任何不明結果禁止重試。',
     inputSchema: schema({ chatName: name, requestId,

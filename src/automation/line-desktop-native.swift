@@ -8426,14 +8426,14 @@ func imageSendDimensionsAllowed(_ width: Int, _ height: Int) -> Bool {
     width > 0 && height > 0 && width <= 8192 && height <= 8192 && width * height <= 16_000_000
 }
 
-func boundedImageBytes(_ path: String) throws -> Data {
+func boundedAttachmentBytes(_ path: String, maximumBytes: Int, prefix: String) throws -> Data {
     let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-    guard fd >= 0 else { throw NativeFailure("IMAGE_FILE_UNSAFE", "無法安全開啟圖片") }
+    guard fd >= 0 else { throw NativeFailure(prefix + "_FILE_UNSAFE", "無法安全開啟附件") }
     defer { close(fd) }
     var info = stat()
     guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
-          info.st_nlink == 1, info.st_size > 0, info.st_size <= 20 * 1024 * 1024 else {
-        throw NativeFailure("IMAGE_FILE_UNSAFE", "圖片必須是單一一般檔案，且最多 20 MiB")
+          info.st_nlink == 1, info.st_size > 0, info.st_size <= maximumBytes else {
+        throw NativeFailure(prefix + "_FILE_UNSAFE", "附件必須是一般單連結檔案，且未超過大小上限")
     }
     var result = Data(count: Int(info.st_size))
     let readCount = result.withUnsafeMutableBytes { buffer -> Int in
@@ -8447,9 +8447,13 @@ func boundedImageBytes(_ path: String) throws -> Data {
     }
     var extra: UInt8 = 0
     guard readCount == result.count, read(fd, &extra, 1) == 0 else {
-        throw NativeFailure("IMAGE_FILE_CHANGED", "圖片讀取期間已變更")
+        throw NativeFailure(prefix + "_FILE_CHANGED", "附件讀取期間已變更")
     }
     return result
+}
+
+func boundedImageBytes(_ path: String) throws -> Data {
+    try boundedAttachmentBytes(path, maximumBytes: 20 * 1024 * 1024, prefix: "IMAGE")
 }
 
 struct ImageSendAsset {
@@ -8459,6 +8463,7 @@ struct ImageSendAsset {
     let digest: String
     let width: Int
     let height: Int
+    var byteCount: Int = 0
 }
 
 func imageSendDigest(_ data: Data) -> String {
@@ -8511,6 +8516,46 @@ func stageImageSendAsset(path: String, expectedDigest: String) throws -> ImageSe
         try? FileManager.default.removeItem(at: directory)
         throw error
     }
+}
+
+// 一般檔案保留原始名稱與內容；目錄名稱綁定完整SHA，供選擇器交叉核對。
+func stageFileSendAsset(path: String, expectedDigest: String) throws -> ImageSendAsset {
+    let data = try boundedAttachmentBytes(path, maximumBytes: 100 * 1024 * 1024, prefix: "ATTACHMENT")
+    guard imageSendDigest(data) == expectedDigest else {
+        throw NativeFailure("FILE_HASH_MISMATCH", "檔案與指定SHA256不符")
+    }
+    let name = URL(fileURLWithPath: path).lastPathComponent.precomposedStringWithCanonicalMapping
+    guard !name.isEmpty, ![".", ".."].contains(name),
+          name.range(of: #"\p{Cc}|[\u{202A}-\u{202E}\u{2066}-\u{2069}]"#, options: .regularExpression) == nil else {
+        throw NativeFailure("FILE_NAME_UNSAFE", "檔名含不支援字元")
+    }
+    let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        .appendingPathComponent("line-mcp-file-" + UUID().uuidString + "-" + expectedDigest, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                           attributes: [.posixPermissions: 0o700])
+    do {
+        let file = directory.appendingPathComponent(name)
+        try data.write(to: file, options: .withoutOverwriting)
+        guard chmod(file.path, 0o600) == 0 else { throw NativeFailure("ATTACHMENT_FILE_UNSAFE", "無法保護檔案快照") }
+        return ImageSendAsset(directory: directory, file: file, sourceDigest: expectedDigest,
+                              digest: expectedDigest, width: 0, height: 0, byteCount: data.count)
+    } catch {
+        try? FileManager.default.removeItem(at: directory)
+        throw error
+    }
+}
+
+func fileSendArgumentsValid(_ args: [String: Any]) -> Bool {
+    guard Set(args.keys) == ["chatName", "filePath", "fileSha256"], validName(args["chatName"]) != nil,
+          let path = args["filePath"] as? String, path.hasPrefix("/"), path.count <= 4096,
+          path.range(of: #"\p{Cc}|[\u{202A}-\u{202E}\u{2066}-\u{2069}]"#, options: .regularExpression) == nil,
+          validHex(args["fileSha256"], count: 64) != nil else { return false }
+    return true
+}
+
+func fileInfoNameMatches(_ value: String, expected: String) -> Bool {
+    value.components(separatedBy: "\n").first?.precomposedStringWithCanonicalMapping ==
+        expected.precomposedStringWithCanonicalMapping
 }
 
 func imageSendComposer(expected: WindowIdentity) throws -> NodeRecord {
@@ -8607,7 +8652,7 @@ func imageSendPathEquivalent(_ observed: String, expected: String) -> Bool {
     // GoTo 欄位與建議列可能分別使用 /var 與 /private/var；僅正規化這個固定別名，兩端都處理。
     let observedPath = observed.hasPrefix("/private/var/") ? String(observed.dropFirst(8)) : observed
     let expectedPath = expected.hasPrefix("/private/var/") ? String(expected.dropFirst(8)) : expected
-    return observedPath == expectedPath
+    return observedPath.precomposedStringWithCanonicalMapping == expectedPath.precomposedStringWithCanonicalMapping
 }
 
 func imageSendGoToReady(field: String, candidates: [String], selected: [Bool], expected: String) -> Bool {
@@ -8652,16 +8697,31 @@ func waitImageSendGoToPath(expected: WindowIdentity, parent: AXUIElement, asset:
 }
 
 func imageSendSelectionVerified(_ tree: Snapshot, asset: ImageSendAsset) throws -> AXUIElement {
-    let previews = tree.nodes.filter {
-        stringAttribute($0.element, kAXIdentifierAttribute) == "Image Preview: " + asset.file.lastPathComponent
-    }
     let locations = tree.nodes.filter {
         stringAttribute($0.element, kAXIdentifierAttribute) == "where popup" &&
             stringAttribute($0.element, kAXValueAttribute) == asset.directory.lastPathComponent
     }
-    guard previews.count == 1, locations.count == 1,
-          imageSendDigest(try boundedImageBytes(asset.file.path)) == asset.digest else {
-        throw NativeFailure("IMAGE_SELECTION_UNVERIFIED", "所選圖片、檔案夾或像素快照無法核對")
+    let selectedCount: Int
+    if asset.width > 0 {
+        selectedCount = tree.nodes.filter {
+            stringAttribute($0.element, kAXIdentifierAttribute) == "Image Preview: " + asset.file.lastPathComponent
+        }.count
+    } else {
+        // 標準NSOpenPanel的TXT與ZIP合成實測：Info的AXValue第一行為完整檔名。
+        // 不讀Quick Look正文作證據，不依賴不穩定的_NS識別碼；另驗SHA目錄、完整GoTo路徑與位元組。
+        let browsers = tree.nodes.indices.filter {
+            tree.nodes[$0].role == kAXBrowserRole && stringAttribute(tree.nodes[$0].element, kAXIdentifierAttribute) == "ColumnView"
+        }
+        guard browsers.count == 1 else { throw NativeFailure("IMAGE_SELECTION_UNVERIFIED", "檔案瀏覽器不唯一") }
+        selectedCount = tree.nodes.indices.filter { index in
+            tree.nodes[index].role == kAXStaticTextRole && isDescendant(index, of: browsers[0], in: tree.nodes) &&
+                fileInfoNameMatches(stringAttribute(tree.nodes[index].element, kAXValueAttribute), expected: asset.file.lastPathComponent)
+        }.count
+    }
+    let data = try boundedAttachmentBytes(asset.file.path,
+        maximumBytes: asset.width > 0 ? 20 * 1024 * 1024 : 100 * 1024 * 1024, prefix: "IMAGE")
+    guard selectedCount == 1, locations.count == 1, imageSendDigest(data) == asset.digest else {
+        throw NativeFailure("IMAGE_SELECTION_UNVERIFIED", "所選附件、檔案夾或快照內容無法核對")
     }
     return try imageSendNode(tree, identifier: "OKButton", role: kAXButtonRole)
 }
@@ -8722,7 +8782,21 @@ func sendImage(_ args: [String: Any]) throws -> [String: Any] {
     guard imageSendArgumentsValid(args) else {
         throw NativeFailure("INVALID_ARGUMENT", "圖片傳送參數格式不正確", ["phase": "pre_commit"])
     }
-    let chat = args["chatName"] as! String, autoSend = (args["autoSend"] as! NSNumber).boolValue
+    return try submitAttachment(chat: args["chatName"] as! String, autoSend: (args["autoSend"] as! NSNumber).boolValue) {
+        try stageImageSendAsset(path: args["imagePath"] as! String, expectedDigest: args["imageSha256"] as! String)
+    }
+}
+
+func sendFile(_ args: [String: Any]) throws -> [String: Any] {
+    guard fileSendArgumentsValid(args) else {
+        throw NativeFailure("INVALID_ARGUMENT", "檔案傳送參數格式錯誤", ["phase": "pre_commit"])
+    }
+    return try submitAttachment(chat: args["chatName"] as! String, autoSend: true) {
+        try stageFileSendAsset(path: args["filePath"] as! String, expectedDigest: args["fileSha256"] as! String)
+    }
+}
+
+func submitAttachment(chat: String, autoSend: Bool, stage: () throws -> ImageSendAsset) throws -> [String: Any] {
     var inputAttempted = false
     var staged: ImageSendAsset?
     defer {
@@ -8730,8 +8804,7 @@ func sendImage(_ args: [String: Any]) throws -> [String: Any] {
         if !inputAttempted, let staged { try? FileManager.default.removeItem(at: staged.directory) }
     }
     do {
-        let asset = try stageImageSendAsset(path: args["imagePath"] as! String,
-                                            expectedDigest: args["imageSha256"] as! String)
+        let asset = try stage()
         staged = asset
         let (identity, parent, point) = try imageSendTarget(chat)
         let targetROI = CGRect(x: point.x - 10, y: point.y - 10, width: 20, height: 20)
@@ -8782,13 +8855,15 @@ func sendImage(_ args: [String: Any]) throws -> [String: Any] {
             _ = try verifyIndexedHeader(chat, expected: identity)
             _ = try imageSendComposer(expected: identity)
         }
-        return ["success": true, "autoSent": autoSend, "chatVerified": true,
+        var receipt: [String: Any] = ["success": true, "autoSent": autoSend, "chatVerified": true,
                 "selectedFileVerified": true, "sourceSha256": asset.sourceDigest,
                 "imageSha256": asset.digest, "width": asset.width, "height": asset.height,
                 "temporaryFileRetained": true,
                 "receipt": ["status": autoSend ? "UI_SUBMITTED" : "IMAGE_SELECTED_NOT_SENT",
                             "deliveryConfirmed": false,
                             "observedAt": ISO8601DateFormatter().string(from: Date())]]
+        if asset.width == 0 { receipt["fileSha256"] = asset.sourceDigest; receipt["byteCount"] = asset.byteCount }
+        return receipt
     } catch let failure as NativeFailure {
         throw forcingPhase(failure, inputAttempted ? "post_commit" : "pre_commit")
     } catch {
@@ -9769,6 +9844,8 @@ func validateArgs(_ request: Request) throws {
         "inspectImageTarget": ["chatName"],
         "inspectImage": ["imagePath", "imageSha256"],
         "sendImage": ["chatName", "imagePath", "imageSha256", "autoSend"],
+        "sendFile": ["chatName", "filePath", "fileSha256"],
+        "inspectFile": ["filePath", "fileSha256"],
         "sendMessage": ["tabName", "chatName", "message", "autoSend"], "selfTest": [],
     ]
     if let keys = allowed[request.name], !Set(request.args.keys).isSubset(of: keys) {
@@ -9878,6 +9955,14 @@ func runSelfTests() throws -> [String: Any] {
     var checks: [String: Bool] = [:]
     let imageArgs: [String: Any] = ["chatName": "合成對話", "imagePath": "/tmp/synthetic.png",
                                    "imageSha256": String(repeating: "a", count: 64), "autoSend": false]
+    let fileArgs: [String: Any] = ["chatName": "Synthetic", "filePath": "/tmp/synthetic.txt",
+                                   "fileSha256": String(repeating: "a", count: 64)]
+    checks["file-send-exact-args"] = fileSendArgumentsValid(fileArgs)
+    var invalidFileArgs = fileArgs; invalidFileArgs["autoSend"] = false
+    checks["file-send-unknown-denied"] = !fileSendArgumentsValid(invalidFileArgs)
+    checks["file-info-name-canonical"] = fileInfoNameMatches("synthetic.txt\nPlain text", expected: "synthetic.txt") &&
+        !fileInfoNameMatches("synthetic.txt.extra\nPlain text", expected: "synthetic.txt") &&
+        fileInfoNameMatches("cafe\u{301}.txt\nPlain text", expected: "caf\u{E9}.txt")
     checks["image-send-exact-args"] = imageSendArgumentsValid(imageArgs)
     checks["image-sheet-owned-chain"] = imageSendSheetIndex(roots: ["open-panel"], nested: [], requested: "open-panel") == 0 &&
         imageSendSheetIndex(roots: ["open-panel"], nested: ["GoToWindow"], requested: "GoToWindow") == 1
@@ -11627,16 +11712,20 @@ func runSelfTests() throws -> [String: Any] {
     let retainedMapped = canonicalReadOCRCandidates(
         [noisyAll] + retainedInvalid, imageWidth: 907, imageHeight: 39
     )
+    // 較舊Swift對zip、閉包與布林鏈同時推導成本過高；拆開但保留全部檢查。
+    let retainedOriginal: [OCRCandidate] = [noisyAll] + retainedInvalid
+    let retainedValuesUnchanged: Bool = zip(retainedMapped, retainedOriginal).allSatisfy { pair in
+        pair.0.text == pair.1.text && pair.0.confidence == pair.1.confidence
+    }
+    let retainedInvalidUnchanged: Bool = retainedMapped.dropFirst().allSatisfy { candidate in
+        !validNormalizedBox(candidate.normalizedBox)
+    }
+    let retainedFrame = rawSelectedFrame(candidates: retainedMapped, masked: retainedMapped,
+                                        imageWidth: 907, imageHeight: 39, underlines: [noisyUnderline])
+    let retainedNoFalseMatch: Bool = allNavigationExactMatches("全部", in: retainedFrame).isEmpty
     checks["global-all-rgb-invalid-retained"] = retainedMapped.count == 5 &&
-        zip(retainedMapped, [noisyAll] + retainedInvalid).allSatisfy {
-            $0.0.text == $0.1.text && $0.0.confidence == $0.1.confidence
-        } && retainedMapped.dropFirst().allSatisfy {
-            !validNormalizedBox($0.normalizedBox)
-        } && allNavigationExactMatches(
-            "全部", in: rawSelectedFrame(candidates: retainedMapped, masked: retainedMapped,
-                                          imageWidth: 907, imageHeight: 39,
-                                          underlines: [noisyUnderline])
-        ).isEmpty
+        retainedValuesUnchanged && retainedInvalidUnchanged && retainedNoFalseMatch
+
     let realRawBox = CGRect(x: 0.010968365855853496, y: 0.44510646650742003,
                             width: 0.0485483245177416, height: 0.40566396713256847)
     let realProcessedBox = CGRect(x: 0.011627906754786988, y: 0.49999999588801458,
@@ -13117,7 +13206,7 @@ func parseRequest() throws -> Request {
 func dispatch(_ request: Request) throws -> [String: Any] {
     // scope gate 必須早於任何 AX、clipboard、capture 或事件建立。
     try enforceLiveScope(request)
-    if request.name != "selfTest" && request.name != "inspectImage" &&
+    if request.name != "selfTest" && request.name != "inspectImage" && request.name != "inspectFile" &&
         ProcessInfo.processInfo.environment["LINE_NATIVE_DISABLE_UI"] == "1" {
         throw NativeFailure("NATIVE_DISABLED", "測試環境已禁止所有 native UI 與程序存取")
     }
@@ -13137,6 +13226,17 @@ func dispatch(_ request: Request) throws -> [String: Any] {
         defer { try? FileManager.default.removeItem(at: asset.directory) }
         return ["sourceSha256": asset.sourceDigest, "imageSha256": asset.digest,
                 "width": asset.width, "height": asset.height, "uiAccessed": false]
+    case "inspectFile":
+        guard Set(request.args.keys) == ["filePath", "fileSha256"],
+              let path = request.args["filePath"] as? String, path.hasPrefix("/"),
+              let digest = validHex(request.args["fileSha256"], count: 64) else {
+            throw NativeFailure("INVALID_ARGUMENT", "檔案檢查參數格式錯誤")
+        }
+        let asset = try stageFileSendAsset(path: path, expectedDigest: digest)
+        defer { try? FileManager.default.removeItem(at: asset.directory) }
+        return ["sourceSha256": asset.sourceDigest, "fileSha256": asset.digest,
+                "byteCount": asset.byteCount, "fileNamePreserved": asset.file.lastPathComponent.precomposedStringWithCanonicalMapping == URL(fileURLWithPath: path).lastPathComponent.precomposedStringWithCanonicalMapping,
+                "uiAccessed": false]
     case "selfTest": return try runSelfTests()
     case "diagnostics":
         return ["checked": true, "accessibilityTrusted": AXIsProcessTrusted(),
@@ -13168,6 +13268,7 @@ func dispatch(_ request: Request) throws -> [String: Any] {
     case "prepareTextExportScope", "exportChatText":
         return try textExportCalibrationRequired(request.name, request.args)
     case "sendImage": return try sendImage(request.args)
+    case "sendFile": return try sendFile(request.args)
     case "sendMessage": return try sendMessage(request.args)
     default: throw NativeFailure("UNKNOWN_NATIVE_COMMAND", "不支援的 native command")
     }

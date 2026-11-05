@@ -12,7 +12,7 @@ export function capabilitiesFor({ platform, nodeVersion, systemVersion, lineVers
     Number(String(systemVersion ?? '0').split('.')[0]) >= 14;
   const indexed = supported && lineVersion === indexedProfile.version && lineBuild === indexedProfile.build;
   return { runtimeSupported: supported, indexedUI: indexed,
-    features: { status: supported, imageSend: indexed, indexedSearch: indexed,
+    features: { status: supported, imageSend: indexed, multiImageSend: indexed, fileSend: indexed, indexedSearch: indexed,
       tabAutomation: supported ? 'requires_live_layout_check' : false },
     expectedIndexedProfile: indexedProfile,
     reasons: [...(!supported ? ['RUNTIME_UNSUPPORTED'] : []), ...(!indexed ? ['INDEXED_UI_PROFILE_UNAVAILABLE'] : [])] };

@@ -84,6 +84,9 @@ test('native 純策略涵蓋幾何、OCR、overlay、同名列與 live scope 零
     'freshmodel-second-order-drift',
     'freshmodel-single-row',
     'freshmodel-window-list-rejected',
+    'file-send-exact-args',
+    'file-send-unknown-denied',
+    'file-info-name-canonical',
     'image-send-dimension-budget',
     'image-send-exact-args',
     'image-send-invalid-args',
@@ -552,6 +555,20 @@ test('native 純策略涵蓋幾何、OCR、overlay、同名列與 live scope 零
   await fs.link(imageFile, hardlink);
   assert.equal(run(binary, { name: 'inspectImage', args: { imagePath: hardlink, imageSha256: imageHash } }).error.code,
     'IMAGE_FILE_UNSAFE');
+
+  const document = path.join(directory, 'synthetic document.txt');
+  await fs.writeFile(document, 'SYNTHETIC DOCUMENT');
+  const documentHash = createHash('sha256').update('SYNTHETIC DOCUMENT').digest('hex');
+  const fileInspection = run(binary, { name: 'inspectFile', args: { filePath: document, fileSha256: documentHash } });
+  assert.equal(fileInspection.ok, true);
+  assert.equal(fileInspection.result.uiAccessed, false);
+  assert.equal(fileInspection.result.fileNamePreserved, true);
+  assert.equal(fileInspection.result.byteCount, 18);
+  assert.equal(fileInspection.result.fileSha256, documentHash);
+  assert.equal(run(binary, { name: 'inspectFile', args: { filePath: document, fileSha256: '0'.repeat(64) } }).error.code, 'FILE_HASH_MISMATCH');
+  const documentLink = path.join(directory, 'document-link.txt');
+  await fs.symlink(document, documentLink);
+  assert.equal(run(binary, { name: 'inspectFile', args: { filePath: documentLink, fileSha256: documentHash } }).error.code, 'ATTACHMENT_FILE_UNSAFE');
 
   // fixture 必須由 Swift 的正式 constructor 產生，再走 JS 真 validator。
   const nativeFixtureCalls = [];

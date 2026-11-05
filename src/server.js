@@ -39,6 +39,9 @@ function recoveryDetails(error) {
   if (typeof error.details?.causeCode === 'string' && /^[A-Z0-9_]{1,64}$/.test(error.details.causeCode)) {
     details.causeCode = error.details.causeCode;
   }
+  for (const key of ['completedCount', 'totalCount', 'failedIndex']) {
+    if (Number.isInteger(error.details?.[key]) && error.details[key] >= 0 && error.details[key] <= 10) details[key] = error.details[key];
+  }
   return details;
 }
 

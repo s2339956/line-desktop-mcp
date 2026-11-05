@@ -15,6 +15,7 @@ import { NativeTextExportReader } from './native-text-export.js';
 import { OperationLock } from './operation-lock.js';
 import { doctor } from './doctor.js';
 import { RequestReceipts, validateRequestId } from './request-records.js';
+import { sendAttachmentBatch } from './attachment-batch.js';
 
 const TOKEN_TTL_MS = 120_000;
 const MAX_STORED_TOKENS = 100;
@@ -722,12 +723,16 @@ export class MacOSDesktopAutomation {
     assertPlainObject(args);
     this.pruneStores();
     switch (name) {
+      case 'line_send_images':
+        return this.sendAttachments(args, 'image');
+      case 'line_send_files':
+        return this.sendAttachments(args, 'file');
       case 'line_doctor':
         assertKnownKeys(args, ['probeNative']);
         return doctor({ bridge: this.bridge, probeNative: args.probeNative ?? false });
       case 'line_operation_status':
         assertKnownKeys(args, ['requestId']);
-        return this.lock.withLock(() => this.requests.status(validateRequestId(args.requestId)));
+        return this.requests.status(validateRequestId(args.requestId), this.journalPath);
       case 'line_resolve_operation':
         assertKnownKeys(args, ['requestId', 'operationId', 'outcome']);
         validateRequestId(args.requestId);
@@ -1814,6 +1819,16 @@ export class MacOSDesktopAutomation {
           operationId, needsRecovery: true, causeCode: error?.code || 'NATIVE_FAILURE' });
       }
     }));
+  }
+
+  async sendAttachments(args, kind) {
+    return sendAttachmentBatch({ args, kind, bridge: this.bridge, lock: this.lock, records: this.requests,
+      journal: {
+        assertEmpty: () => this.assertNoPendingJournal(),
+        write: record => this.writeJournal(record),
+        clear: () => this.clearJournal(),
+      },
+    });
   }
 
   async readImagePreviewRecoveryRecord(args) {
