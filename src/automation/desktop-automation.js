@@ -13,6 +13,8 @@ import {
 import { NativeBridge } from './native-bridge.js';
 import { NativeTextExportReader } from './native-text-export.js';
 import { OperationLock } from './operation-lock.js';
+import { doctor } from './doctor.js';
+import { RequestReceipts, validateRequestId } from './request-records.js';
 
 const TOKEN_TTL_MS = 120_000;
 const MAX_STORED_TOKENS = 100;
@@ -690,6 +692,7 @@ export class MacOSDesktopAutomation {
       'pending-operation.json'
     ),
     recoveryEvidenceDirectory,
+    requests,
   } = {}) {
     this.bridge = bridge;
     this.lock = lock;
@@ -708,6 +711,7 @@ export class MacOSDesktopAutomation {
     this.journalPath = journalPath;
     this.recoveryEvidenceDirectory = recoveryEvidenceDirectory ||
       path.join(path.dirname(journalPath), 'recovery-evidence');
+    this.requests = requests || new RequestReceipts(path.join(path.dirname(journalPath), 'requests'));
     this.recoveryLatch = null;
     this.plans = new Map();
     this.cursors = new Map();
@@ -718,6 +722,16 @@ export class MacOSDesktopAutomation {
     assertPlainObject(args);
     this.pruneStores();
     switch (name) {
+      case 'line_doctor':
+        assertKnownKeys(args, ['probeNative']);
+        return doctor({ bridge: this.bridge, probeNative: args.probeNative ?? false });
+      case 'line_operation_status':
+        assertKnownKeys(args, ['requestId']);
+        return this.lock.withLock(() => this.requests.status(validateRequestId(args.requestId)));
+      case 'line_resolve_operation':
+        assertKnownKeys(args, ['requestId', 'operationId', 'outcome']);
+        validateRequestId(args.requestId);
+        return this.lock.withLock(() => this.requests.resolve(args, this.journalPath, () => this.bridge.call('status')));
       case 'line_send_image':
         return this.sendImage(args);
       case 'line_desktop_status':
@@ -1702,18 +1716,20 @@ export class MacOSDesktopAutomation {
     );
   }
 
-  async legacySend(chatName, message, autoSend) {
+  async legacySend(chatName, message, autoSend, requestId) {
     assertSafeName(chatName, 'chatName');
     if (typeof message !== 'string' || message.length === 0 || message.length > 50_000) {
       throw new AutomationError('INVALID_ARGUMENT', 'message 必須是 1 到 50000 字元的字串');
     }
-    return this.lock.withLock(async () => {
+    if (requestId !== undefined) validateRequestId(requestId);
+    const shouldSend = Boolean(autoSend);
+    const actionHash = digest({ action: shouldSend ? 'legacySend' : 'legacyDraft', chatName,
+      ...(requestId === undefined ? {} : { messageSha256: digest(message) }) });
+    return this.lock.withLock(() => this.requests.run(requestId, actionHash, async ({ operationId, commit }) => {
       await this.assertNoPendingJournal();
-      const shouldSend = Boolean(autoSend);
-      const operationId = crypto.randomUUID();
       await this.writeJournal({
         operationId,
-        actionHash: digest({ action: shouldSend ? 'legacySend' : 'legacyDraft', chatName }),
+        actionHash,
         createdAt: new Date(this.now()).toISOString(),
       });
       try {
@@ -1730,6 +1746,7 @@ export class MacOSDesktopAutomation {
             phase: 'post_commit',
           });
         }
+        await commit(result);
         await this.clearJournal();
         return result;
       } catch (error) {
@@ -1751,11 +1768,11 @@ export class MacOSDesktopAutomation {
           causeCode: error?.code || 'NATIVE_FAILURE',
         });
       }
-    });
+    }));
   }
 
   async sendImage(args) {
-    assertKnownKeys(args, ['chatName', 'imagePath', 'imageSha256', 'autoSend']);
+    assertKnownKeys(args, ['chatName', 'imagePath', 'imageSha256', 'autoSend', 'requestId']);
     const chatName = assertSafeName(args.chatName, 'chatName');
     if (typeof args.imagePath !== 'string' || args.imagePath.length > 4096 ||
         !path.isAbsolute(args.imagePath) || /\p{Cc}/u.test(args.imagePath) ||
@@ -1764,14 +1781,15 @@ export class MacOSDesktopAutomation {
       throw new AutomationError('INVALID_ARGUMENT', '圖片需要絕對路徑、SHA256 與 boolean autoSend');
     }
     const autoSend = args.autoSend ?? false;
-    return this.lock.withLock(async () => {
+    if (args.requestId !== undefined) validateRequestId(args.requestId);
+    const actionHash = digest({ action: 'sendImage', chatName, imageSha256: args.imageSha256, autoSend });
+    return this.lock.withLock(() => this.requests.run(args.requestId, actionHash, async ({ operationId, commit }) => {
       await this.assertNoPendingJournal();
-      const operationId = crypto.randomUUID();
       await this.writeJournal({ operationId,
-        actionHash: digest({ action: 'sendImage', chatName, imageSha256: args.imageSha256, autoSend }),
+        actionHash,
         createdAt: new Date(this.now()).toISOString() });
       try {
-        const result = await this.bridge.call('sendImage', { ...args, chatName, autoSend });
+        const result = await this.bridge.call('sendImage', { chatName, imagePath: args.imagePath, imageSha256: args.imageSha256, autoSend });
         // 僅接受本次圖片、收件者與模式均核對的回條；選入圖片不等於已送出。
         if (result?.success !== true || result.autoSent !== autoSend ||
             result.sourceSha256 !== args.imageSha256 || !HEX_64.test(result.imageSha256 ?? '') ||
@@ -1780,6 +1798,7 @@ export class MacOSDesktopAutomation {
             result.receipt.deliveryConfirmed !== false) {
           throw new AutomationError('SEND_UNVERIFIED', '圖片回條與本次請求不符');
         }
+        await commit(result);
         await this.clearJournal();
         return result;
       } catch (error) {
@@ -1794,7 +1813,7 @@ export class MacOSDesktopAutomation {
         throw new AutomationError('OPERATION_UNCERTAIN', '圖片選入或提交狀態不明，禁止自動重試', {
           operationId, needsRecovery: true, causeCode: error?.code || 'NATIVE_FAILURE' });
       }
-    });
+    }));
   }
 
   async readImagePreviewRecoveryRecord(args) {

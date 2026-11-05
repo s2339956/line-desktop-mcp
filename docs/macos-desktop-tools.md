@@ -1,6 +1,6 @@
 # macOS 工具與限制
 
-1.2.1統一入口為 `src/server.js`。stdio提供15工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
+1.3.0統一入口為 `src/server.js`。stdio提供18工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -35,3 +35,11 @@
 私有圖片快照留在系統暫存目錄，避免LINE延後讀檔失敗；最小恢復紀錄在 `~/Library/Application Support/line-desktop-mcp/`，編譯快取在 `~/Library/Caches/line-desktop-mcp/`，均不發布。LINE仍可能讀檔或結果不明時不可任意清除。不保存聊天正文log，沒有遙測、雲端圖片下載或週期發送。
 
 權限須給真正啟動服務的client／終端機。LINE須登入、未鎖定且視窗可見；延伸螢幕仍受可辨識結構限制。LINE版本、語言、縮放或配置變更可能使工具拒絕操作，不放寬核對作備援。已驗環境見 [TESTING](TESTING.md)。
+
+## 1.3.0 健檢與請求紀錄
+
+`line_doctor {probeNative:false}`或`npm run doctor`不編譯、不操作LINE，列出版本與相容性；`probeNative:true`或CLI加`--native`才呼叫原生權限探針，可能首次編譯，完全不讀對話。`uiReadinessConfirmed`僅表示權限與程序基本條件，不取代發送前的完整視窗核對。未驗證版本不放寬indexed profile。
+
+文字manual／auto與單圖工具可傳16–128位英數、底線或連字號的`requestId`。同編號須保持內容與模式不變；已完成時回既有回條且`replayed:true`。持久化資料只有雜湊、狀態及必要回條，不保存路徑、對話名或文字。無編號的舊呼叫維持原行為。
+
+`line_operation_status {requestId}`查詢狀態。只有使用者已人工觀察結果時，才使用`line_resolve_operation {requestId,operationId,outcome:"submitted"或"abandoned"}`。工具不判斷對方收到或已讀；先封存精確journal並比對穩定主窗，原請求永久不可重送。`submitted`是使用者回報，不能冒充UI驗證回條；不會清除別的操作。

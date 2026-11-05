@@ -242,6 +242,7 @@ export class LineDesktopMCPServer {
                   type: 'string',
                   description: 'Message content to send',
                 },
+                requestId: { type: 'string', minLength: 16, maxLength: 128, description: '本機stdio的持久化防重請求編號；同編號不可更換內容。' },
               },
               required: ['chatName', 'message'],
             },
@@ -260,6 +261,7 @@ export class LineDesktopMCPServer {
                   type: 'string',
                   description: 'Message content to send',
                 },
+                requestId: { type: 'string', minLength: 16, maxLength: 128, description: '本機stdio的持久化防重請求編號；同編號不可更換內容。' },
               },
               required: ['chatName', 'message'],
             },
@@ -380,9 +382,14 @@ export class LineDesktopMCPServer {
   }
 
   async handleSendMessage(args, autoSend = false) {
-    const { chatName, message } = args;
+    const { chatName, message, requestId } = args;
     
-    const result = await this.lineAutomation.sendChatMessage(chatName, message, autoSend);
+    if (requestId !== undefined && this.desktopContext.transport !== 'stdio') {
+      throw Object.assign(new Error('requestId限本機stdio使用'), { code: 'TRANSPORT_NOT_ALLOWED' });
+    }
+    const result = requestId === undefined
+      ? await this.lineAutomation.sendChatMessage(chatName, message, autoSend)
+      : await this.lineAutomation.sendChatMessage(chatName, message, autoSend, requestId);
     // 視窗送出只證明 UI 已提交，不能把輸入區清空包裝成 LINE 伺服器送達。
     const receipt = ['DRAFT_WRITTEN', 'UI_SUBMITTED'].includes(result.receipt?.status)
       ? { status: result.receipt.status, deliveryConfirmed: false,
@@ -394,6 +401,7 @@ export class LineDesktopMCPServer {
           type: 'text',
           text: JSON.stringify({
             success: result.success,
+            ...(result.replayed ? { replayed: true } : {}),
             chatName,
             message,
             timestamp: new Date().toISOString(),

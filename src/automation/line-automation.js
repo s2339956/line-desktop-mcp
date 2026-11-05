@@ -65,9 +65,11 @@ export class LineAutomation {
     return result;
   }
 
-  async sendChatMessage(chatName, message, autoSend = false) {
+  async sendChatMessage(chatName, message, autoSend = false, requestId) {
     if (typeof this.automation.sendChatMessage === 'function') {
-      return this.automation.sendChatMessage(chatName, message, autoSend);
+      return requestId === undefined
+        ? this.automation.sendChatMessage(chatName, message, autoSend)
+        : this.automation.sendChatMessage(chatName, message, autoSend, requestId);
     }
     await this.automation.switchToEnglish();
     await this.automation.activateLine();

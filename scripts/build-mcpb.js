@@ -15,7 +15,7 @@ const ROOT_FILES = [
   'LICENSE.md',
   'docs/macos-desktop-tools.md',
   'NOTICE.md', 'CHANGELOG.md', 'Install.command',
-  'scripts/setup-mac.mjs', 'scripts/check-install.mjs',
+  'scripts/setup-mac.mjs', 'scripts/check-install.mjs', 'scripts/doctor.mjs',
   'docs/AI-AGENTS.md', 'docs/TESTING.md', 'docs/SOURCE.md',
 ];
 // 發行包只保留安裝所需腳本；測試、實機驗收和診斷工具均不封裝。

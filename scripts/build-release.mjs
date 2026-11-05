@@ -7,7 +7,7 @@ import { buildMCPB } from './build-mcpb.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const { version } = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
-const directory = path.join(root, 'dist');
+const directory = path.join(root, 'dist', `v${version}`);
 await fs.mkdir(directory, { recursive: true });
 const base = `line-desktop-mcp-${version}-macos`;
 const bundle = path.join(directory, `${base}.mcpb`);

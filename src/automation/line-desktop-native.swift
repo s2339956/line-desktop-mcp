@@ -9748,7 +9748,7 @@ func enforceLiveScope(_ request: Request) throws {
 
 func validateArgs(_ request: Request) throws {
     let allowed: [String: Set<String>] = [
-        "status": [], "processStatus": [], "accessibilityStatus": [], "activateLine": [],
+        "diagnostics": [], "status": [], "processStatus": [], "accessibilityStatus": [], "activateLine": [],
         "listTabs": ["maxPages"], "listTabChats": ["tabName", "limit", "offset", "expectedDigest", "expectedWindow"],
         "previewMarkTabRead": ["tabName"], "snapshotMarkTabRead": ["tabName", "expectedWindow"],
         "executeMarkTabRead": ["tabName", "snapshotDigest", "expectedWindow"],
@@ -13138,6 +13138,11 @@ func dispatch(_ request: Request) throws -> [String: Any] {
         return ["sourceSha256": asset.sourceDigest, "imageSha256": asset.digest,
                 "width": asset.width, "height": asset.height, "uiAccessed": false]
     case "selfTest": return try runSelfTests()
+    case "diagnostics":
+        return ["checked": true, "accessibilityTrusted": AXIsProcessTrusted(),
+                "screenCaptureTrusted": CGPreflightScreenCaptureAccess(),
+                "lineRunning": !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty,
+                "inputAttempted": false, "contentRead": false]
     case "status": return try status()
     case "processStatus": return ["running": !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty]
     case "accessibilityStatus": return ["trusted": AXIsProcessTrusted()]

@@ -50,8 +50,8 @@ export class MacOSLineAutomation {
     return result;
   }
 
-  async sendChatMessage(chatName, message, autoSend = false) {
-    return this.desktop.legacySend(chatName, message, autoSend);
+  async sendChatMessage(chatName, message, autoSend = false, requestId) {
+    return this.desktop.legacySend(chatName, message, autoSend, requestId);
   }
 
   async sendMessage(chatName, message, autoSend = false) {

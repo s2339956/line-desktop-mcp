@@ -2,7 +2,7 @@
 
 讓支援MCP的AI agent在Mac上讀取有界聊天內容、撰寫文字，以及傳送單張PNG／JPEG。功能統一由同一個本機stdio MCP服務提供。
 
-**版本1.2.1 · MIT開源 · macOS發行版**
+**版本1.3.0 · MIT開源 · macOS發行版**
 
 衍生自 [Geoffrey Wang／dtwang 的 line-desktop-mcp](https://github.com/dtwang/line-desktop-mcp)，基準為上游 **1.1.2**。此分支由 [s2339956](https://github.com/s2339956) 維護macOS原生helper、圖片工具與安裝封裝。來源與授權見 [SOURCE](docs/SOURCE.md)、[NOTICE](NOTICE.md) 及 [MIT License](LICENSE.md)。本專案與LINE官方無關，不是Messaging API的LINE Bot。
 
@@ -12,13 +12,13 @@
 
 ### Claude Desktop：MCPB
 
-從 [Releases](https://github.com/s2339956/line-desktop-mcp/releases/latest) 下載 `line-desktop-mcp-1.2.1-macos.mcpb`，在Claude Desktop擴充功能設定選「Install Extension…」並開啟；支援檔案關聯的client也可雙擊。包內已有鎖定依賴，不下載上游 `npx @latest`。流程參見 [Claude官方文件](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)。
+從 [Releases](https://github.com/s2339956/line-desktop-mcp/releases/latest) 下載 `line-desktop-mcp-1.3.0-macos.mcpb`，在Claude Desktop擴充功能設定選「Install Extension…」並開啟；支援檔案關聯的client也可雙擊。包內已有鎖定依賴，不下載上游 `npx @latest`。流程參見 [Claude官方文件](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)。
 
 依macOS提示，手動授予實際執行client「輔助使用」及「螢幕錄製」權限，再重新啟動client。權限不會自動放寬。
 
 ### ZIP：雙擊安裝
 
-下載同一Release的 `line-desktop-mcp-1.2.1-macos.zip`，解壓到長期保留的資料夾，雙擊 **`Install.command`**。它會檢查需求、編譯helper、驗證MCP協定、備份並合併Claude Desktop設定，並產生通用 `mcp-config.json`。其他MCP設定保留，安裝不讀取或傳送LINE內容。
+下載同一Release的 `line-desktop-mcp-1.3.0-macos.zip`，解壓到長期保留的資料夾，雙擊 **`Install.command`**。它會檢查需求、編譯helper、驗證MCP協定、備份並合併Claude Desktop設定，並產生通用 `mcp-config.json`。其他MCP設定保留，安裝不讀取或傳送LINE內容。
 
 未安裝Command Line Tools時，先執行 `xcode-select --install`，完成Apple流程後再雙擊。若系統攔阻下載的腳本，請先檢視來源與組織政策；工具不移除quarantine或關閉保護。安裝後不要移動資料夾；移動或更新到新資料夾時重跑安裝以更新路徑。MCPB與ZIP安裝擇一即可。
 
@@ -26,7 +26,7 @@
 
 ## 使用
 
-連接後確認服務版號 **1.2.1**、**15個工具**，先呼叫 `line_desktop_status`。LINE須已登入、未鎖定且視窗可見；操作時暫停鍵鼠與其他桌面自動化。
+連接後確認服務版號 **1.3.0**、**18個工具**，先呼叫 `line_desktop_status`。LINE須已登入、未鎖定且視窗可見；操作時暫停鍵鼠與其他桌面自動化。
 
 對agent說：
 
@@ -34,9 +34,9 @@
 
 > 把指定文字放入指定對話草稿，不送出。
 
-> 我已開啟指定對話。核對標題並計算本機圖片SHA256，先選入圖片但不送出。
+> 我已開啟指定對話。核對標題、計算本機圖片SHA256，使用穩定requestId直接送出。
 
-實際發送須明確指定對話、圖片與送出意圖。圖片預設 `autoSend:false`；true會按一次可能立即送出的「打開」。`UI_SUBMITTED`作為已發出驗收，不額外檢查對方收到或已讀。限制與回條見 [工具說明](docs/macos-desktop-tools.md)。
+實際發送須明確指定對話、圖片與送出意圖；正常流程直接提交，不增加確認／取消關卡。圖片預設 `autoSend:false`；true會按一次可能立即送出的「打開」。`UI_SUBMITTED`作為已發出驗收，不額外檢查對方收到或已讀。限制與回條見 [工具說明](docs/macos-desktop-tools.md)。
 
 ## 隱私
 

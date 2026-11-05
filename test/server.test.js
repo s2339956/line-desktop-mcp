@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { LineDesktopMCPServer, parseArgs } from '../src/server.js';
 import { desktopTools } from '../src/desktop-tools.js';
+
+const packageVersion = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const legacyNames = [
   'get_line_chatroom_history_default', 'get_line_chatroom_history_long',
@@ -72,7 +74,7 @@ test('MCP initialize/list 保留五工具並列出新工具，schema 禁止未�
   try {
     const { tools } = await pair.client.listTools();
     assert.deepEqual(tools.map(t => t.name), [...legacyNames, ...desktopTools.map(t => t.name)]);
-    assert.equal(pair.client.getServerVersion().version, '1.2.1');
+    assert.equal(pair.client.getServerVersion().version, packageVersion);
     for (const tool of tools.filter(t => t.name.startsWith('line_'))) {
       assert.equal(tool.inputSchema.additionalProperties, false);
     }

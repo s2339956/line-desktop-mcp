@@ -7,11 +7,33 @@ const resultIndex = { type: 'integer', minimum: 1, maximum: 20 };
 const date = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'LINE 畫面的本地日曆日期；執行端另驗證有效日期。' };
 const schema = (properties, required = []) => ({ ...object(properties), required });
 
+const requestId = { type: 'string', pattern: '^[A-Za-z0-9_-]{16,128}$', minLength: 16, maxLength: 128 };
+
 export const desktopTools = [
+  {
+    name: 'line_doctor',
+    description: '本機健檢與功能相容性報告；預設不編譯helper。probeNative:true可檢查桌面權限，不啟用LINE或讀取內容。',
+    inputSchema: schema({ probeNative: { type: 'boolean', default: false } }),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'line_operation_status',
+    description: '用原requestId查詢操作狀態，不重送。',
+    inputSchema: schema({ requestId }, ['requestId']),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'line_resolve_operation',
+    description: '使用者已人工核對結果後，將指定請求標記為已提交或放棄；先封存精確紀錄，再解除阻擋，原requestId永久不可重送。不操作LINE，不可自動猜測outcome。',
+    inputSchema: schema({ requestId, operationId: { type: 'string' },
+      outcome: { type: 'string', enum: ['submitted', 'abandoned'] },
+    }, ['requestId', 'operationId', 'outcome']),
+    annotations: { readOnlyHint: false, idempotentHint: true },
+  },
   {
     name: 'line_send_image',
     description: '將單張 PNG/JPEG 選入目前已開啟且標題核對相符的 LINE 對話，不搜尋或換對話。預設 autoSend:false，只停在已核對的附件選擇器；autoSend:true 會按一次打開，可能立即送出，僅限使用者已明確授權。圖片須綁定 SHA256；任何不明結果禁止重試。',
-    inputSchema: schema({ chatName: name,
+    inputSchema: schema({ chatName: name, requestId,
       imagePath: { type: 'string', minLength: 1, maxLength: 4096, description: '本機圖片的絕對路徑。' },
       imageSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
       autoSend: { type: 'boolean', default: false },
