@@ -72,7 +72,7 @@ test('MCP initialize/list 保留五工具並列出新工具，schema 禁止未�
   try {
     const { tools } = await pair.client.listTools();
     assert.deepEqual(tools.map(t => t.name), [...legacyNames, ...desktopTools.map(t => t.name)]);
-    assert.equal(pair.client.getServerVersion().version, '1.2.0');
+    assert.equal(pair.client.getServerVersion().version, '1.2.1');
     for (const tool of tools.filter(t => t.name.startsWith('line_'))) {
       assert.equal(tool.inputSchema.additionalProperties, false);
     }

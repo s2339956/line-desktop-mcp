@@ -1,13 +1,14 @@
 name: macOS checks
 on:
   push:
+    branches: [main]
   pull_request:
 permissions:
   contents: read
 jobs:
   offline:
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       LINE_MCP_DISABLE_NATIVE: '1'
       LINE_NATIVE_DISABLE_UI: '1'

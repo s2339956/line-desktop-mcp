@@ -182,7 +182,8 @@ export class NativeBridge {
       compilerPath = '/usr/bin/swiftc',
       // 冷啟動 Vision、雙快照與原生文字選單共用一個預算，避免中途終止而來不及還原剪貼簿。
       timeoutMs = 30_000,
-      compileTimeoutMs = 60_000,
+      // 冷機首次載入Swift SDK可能超過兩分鐘；只延長編譯，不延長LINE操作。
+      compileTimeoutMs = 300_000,
       maxBuffer = 2 * 1024 * 1024,
       liveScope = null,
     } = options;

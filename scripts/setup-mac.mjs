@@ -66,7 +66,7 @@ export async function setupMac(args = process.argv.slice(2)) {
       if (install.error || install.status !== 0) throw new Error('依賴安裝失敗，未修改client設定');
     }
     const { NativeBridge } = await import('../src/automation/native-bridge.js');
-    const bridge = new NativeBridge({ compileTimeoutMs: 180_000 });
+    const bridge = new NativeBridge({ compileTimeoutMs: 300_000 });
     const binary = await bridge.ensureBinary();
     const selfTest = JSON.parse(execFileSync(binary, [], {
       input: JSON.stringify({ name: 'selfTest', args: {} }), encoding: 'utf8', timeout: 15_000,

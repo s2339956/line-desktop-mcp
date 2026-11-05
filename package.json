@@ -1,6 +1,6 @@
 {
   "name": "line-desktop-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "macOS LINE Desktop MCP：AI agent 本機文字、圖片與有界歷史整合",
   "main": "./src/server.js",
   "bin": {

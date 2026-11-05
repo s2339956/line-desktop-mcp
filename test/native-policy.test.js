@@ -39,14 +39,14 @@ test('native 純策略涵蓋幾何、OCR、overlay、同名列與 live scope 零
     source, '-target', `${architecture}-apple-macosx14.0`, '-O', '-o', binary,
   ], {
     encoding: 'utf8',
-    timeout: 120_000,
+    timeout: 300_000,
     env: {
       ...process.env,
       CLANG_MODULE_CACHE_PATH: moduleCache,
       SWIFT_MODULECACHE_PATH: moduleCache,
     },
   });
-  assert.equal(compile.status, 0, compile.stderr);
+  assert.equal(compile.status, 0, compile.error?.message ?? compile.stderr);
 
   const selfTest = run(binary, { name: 'selfTest', args: {} });
   assert.equal(selfTest.ok, true);

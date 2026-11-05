@@ -20,7 +20,7 @@ AI agent須支援 **本機MCP stdio**；服務、LINE與桌面權限須在同一
 }
 ```
 
-`CHAT_LOG_ON`僅保留設定相容性；1.2.0已移除聊天正文寫檔。不將生成的個人設定上傳公開issue。若只需產生設定、不安裝或編譯，可用 `node scripts/setup-mac.mjs --config-only`。
+`CHAT_LOG_ON`僅保留設定相容性；1.2.1已移除聊天正文寫檔。不將生成的個人設定上傳公開issue。若只需產生設定、不安裝或編譯，可用 `node scripts/setup-mac.mjs --config-only`。
 
 ## Codex
 
