@@ -48,12 +48,15 @@ export async function doctor({ bridge, probeNative = false, run = execute, fileS
       const result = await bridge.call('diagnostics');
       checks.native = Object.fromEntries(['checked', 'accessibilityTrusted', 'screenCaptureTrusted', 'lineRunning']
         .map(key => [key, result[key] === true]));
+      if (checks.native.checked) { cached = true; checks.nativeCache = 'available'; }
     }
     catch (error) { checks.native = { checked: false, reason: /^[A-Z0-9_]+$/.test(error.code ?? '') ? error.code : 'PROBE_FAILED' }; }
   } else checks.native = { checked: false, reason: 'NATIVE_PROBE_NOT_REQUESTED' };
+  const compatibility = capabilitiesFor({ platform, nodeVersion, systemVersion: macVersion, lineVersion, lineBuild });
   return { platform, nodeVersion, macOSVersion: macVersion, line: { version: lineVersion, build: lineBuild },
-    compatibility: capabilitiesFor({ platform, nodeVersion, systemVersion: macVersion, lineVersion, lineBuild }),
-    checks, uiReadinessConfirmed: checks.native?.accessibilityTrusted === true && checks.native?.screenCaptureTrusted === true && checks.native?.lineRunning === true,
+    compatibility,
+    checks, uiReadinessConfirmed: compatibility.runtimeSupported && checks.native?.accessibilityTrusted === true &&
+      checks.native?.screenCaptureTrusted === true && checks.native?.lineRunning === true,
     recommendations: [...(checks.compiler === 'missing' ? ['INSTALL_XCODE_COMMAND_LINE_TOOLS'] : []),
       ...(!cached ? ['RUN_MAC_SETUP_TO_PRECOMPILE'] : []),
       ...(!probeNative ? ['RUN_DOCTOR_WITH_NATIVE_PROBE_FOR_PERMISSION_CHECKS'] : [])],

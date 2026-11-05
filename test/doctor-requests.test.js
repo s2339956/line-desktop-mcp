@@ -38,6 +38,11 @@ test('健檢不將未知版本或尚未檢查權限回報為就緒', async () =>
   assert.equal(report.uiReadinessConfirmed, false);
   assert.equal(report.contentRead, false);
   assert.equal(report.compatibility.features.imageSend, true);
+  const prepared = await doctor({ platform: 'darwin', probeNative: true,
+    bridge: { async call() { return { checked: true, accessibilityTrusted: true, screenCaptureTrusted: true, lineRunning: true }; } },
+    run: async () => ({ stdout: '26.4.1' }) });
+  assert.equal(prepared.checks.nativeCache, 'available');
+  assert.equal(prepared.recommendations.includes('RUN_MAC_SETUP_TO_PRECOMPILE'), false);
 });
 
 test('文字requestId綁定正文摘要；重複提交不重送且正文不落盤', async t => {
