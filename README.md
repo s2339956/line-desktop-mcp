@@ -1,415 +1,58 @@
-# LINE Desktop MCP
+# LINE Desktop MCP for macOS
 
-[English](#english) | [繁體中文](#繁體中文)
+讓支援MCP的AI agent在Mac上讀取有界聊天內容、撰寫文字，以及傳送單張PNG／JPEG。功能統一由同一個本機stdio MCP服務提供。
 
----
+**版本1.2.0 · MIT開源 · macOS發行版**
 
-## 繁體中文
+衍生自 [Geoffrey Wang／dtwang 的 line-desktop-mcp](https://github.com/dtwang/line-desktop-mcp)，基準為上游 **1.1.2**。此分支由 [s2339956](https://github.com/s2339956) 維護macOS原生helper、圖片工具與安裝封裝。來源與授權見 [SOURCE](docs/SOURCE.md)、[NOTICE](NOTICE.md) 及 [MIT License](LICENSE.md)。本專案與LINE官方無關，不是Messaging API的LINE Bot。
 
-透過 MCP（Model Context Protocol），使 AI 工具能夠與 LINE Desktop 整合，並執行訊息的讀取與發送操作。
+## 安裝
 
-![LINE Desktop MCP Demo with Claude Desktop](doc_media/line-desktop-demo-4x.gif)
+需要macOS 14以上、已登入的LINE Desktop、Xcode Command Line Tools。ZIP／原始碼安裝另需Node.js 22以上；MCPB使用client提供的Node runtime，也須符合版本需求。已驗環境與支援範圍見 [TESTING](docs/TESTING.md)。
 
-![LINE Desktop MCP Demo with n8n](doc_media/line-desktop-mcp-demo-n8n-2x.gif)
+### Claude Desktop：MCPB
 
-### ⚠️ 重要說明
+從 [Releases](https://github.com/s2339956/line-desktop-mcp/releases/latest) 下載 `line-desktop-mcp-1.2.0-macos.mcpb`，在Claude Desktop擴充功能設定選「Install Extension…」並開啟；支援檔案關聯的client也可雙擊。包內已有鎖定依賴，不下載上游 `npx @latest`。流程參見 [Claude官方文件](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)。
 
-**這個專案不是 LINE 官方的 line-bot-mcp-server**
+依macOS提示，手動授予實際執行client「輔助使用」及「螢幕錄製」權限，再重新啟動client。權限不會自動放寬。
 
-如果你要找的是官方版本，請前往：https://github.com/line/line-bot-mcp-server
+### ZIP：雙擊安裝
 
-### 與官方版本的差異
+下載同一Release的 `line-desktop-mcp-1.2.0-macos.zip`，解壓到長期保留的資料夾，雙擊 **`Install.command`**。它會檢查需求、編譯helper、驗證MCP協定、備份並合併Claude Desktop設定，並產生通用 `mcp-config.json`。其他MCP設定保留，安裝不讀取或傳送LINE內容。
 
-- **官方 line-bot-mcp-server**：透過 LINE Messaging API 操作 LINE Bot
-- **本專案 line-desktop-mcp**：透過 MCP 在 Windows 或 Mac 上直接操作 LINE Desktop 應用程式
+未安裝Command Line Tools時，先執行 `xcode-select --install`，完成Apple流程後再雙擊。若系統攔阻下載的腳本，請先檢視來源與組織政策；工具不移除quarantine或關閉保護。安裝後不要移動資料夾；移動或更新到新資料夾時重跑安裝以更新路徑。MCPB與ZIP安裝擇一即可。
 
-### 重要聲明
+其他AI agent、Codex與手動接法見 **[AI agent整合](docs/AI-AGENTS.md)**。
 
-1. **本專案與 LINE 官方無任何關聯**  
-   This project is NOT officially affiliated with LINE.
+## 使用
 
-2. **無需申請 LINE Developers 或使用 Channel Access Token**  
-   本專案透過已經完成登入的 LINE Desktop 應用程式進行操作，不需要申請開發者帳號或 API Token。
+連接後確認服務版號 **1.2.0**、**15個工具**，先呼叫 `line_desktop_status`。LINE須已登入、未鎖定且視窗可見；操作時暫停鍵鼠與其他桌面自動化。
 
-### 關於專案
+對agent說：
 
-LINE Desktop MCP 是一個基於 Model Context Protocol 的整合工具，讓 AI 工具（如 Claude Desktop, n8n ），能夠直接與 LINE Desktop 應用程式互動。透過此專案，您可以：
+> 檢查LINE是否可用，再讀取指定對話最近5個可觀察區塊，說明範圍是否完整。
 
-- 📖 讀取 LINE 聊天訊息
-- ✉️ 發送 LINE 訊息（手動或自動）
-- 🤖 將 LINE 整合到您的 AI 工作流程中
+> 把指定文字放入指定對話草稿，不送出。
 
-### 功能特色
+> 我已開啟指定對話。核對標題並計算本機圖片SHA256，先選入圖片但不送出。
 
-- 🤖 **AI 整合**：透過 MCP 協議與 Claude Desktop、 n8n 等 AI 工具無縫整合
-- 💬 **訊息操作**：支援讀取和發送 LINE 訊息
-- 🖥️ **桌面整合**：直接與 LINE Desktop 應用程式互動
-- 🔄 **自動化支援**：可選擇手動確認或自動發送訊息
+實際發送須明確指定對話、圖片與送出意圖。圖片預設 `autoSend:false`；true會按一次可能立即送出的「打開」。`UI_SUBMITTED`作為已發出驗收，不額外檢查對方收到或已讀。限制與回條見 [工具說明](docs/macos-desktop-tools.md)。
 
-### 系統需求
+## 隱私
 
-#### 基本需求
+工具不設遙測、不上傳診斷資料、不保存聊天正文log，不需要LINE API token。讀取結果仍會交給你選擇的AI client／模型；發送透過LINE送往指定對話，請選用信任的agent。
 
-- **LINE Desktop**：v9.10 或以上版本
-- **作業系統**：
-  - Windows 10 或以上版本
-  - macOS Ventura 13.0 或以上版本（需要 AppleScript 支援）
+公開測試只用合成資料；安裝包不含測試、實機診斷腳本、聊天截圖、操作紀錄、草稿備份或本機設定。生成的 `mcp-config.json` 含絕對路徑，已排除Git。私有圖片快照及不明操作的最小恢復紀錄保留在本機，不自動清除；勿在LINE仍可能讀檔或結果不明時任意刪除。
 
-#### 與 Claude Desktop 整合
+## 開發
 
-- **Claude Desktop App**：最新版本
-- **Claude 訂閱方案**：Pro 方案
-
-#### 與 n8n 整合
-
-- **n8n**：支援 MCP 的版本
-
-### 安裝方式
-
-#### Windows
-
-1. **安裝 Node.js**
-   - 參考微軟官方文件：https://learn.microsoft.com/zh-tw/windows/dev-environment/javascript/nodejs-on-windows
-
-2. **安裝 AutoHotkey v2**
-   - 下載並安裝：https://www.autohotkey.com/
-
-3. **設定 Claude Desktop**
-   - 開啟 Claude Desktop 設定檔
-   - 在 `mcpServers` 中加入以下設定：
-
-```json
-{
-  "mcpServers": {
-    "line-desktop-mcp": {
-      "command": "npx",
-      "args": ["line-desktop-mcp@latest"]
-    }
-  }
-}
+```sh
+git clone https://github.com/s2339956/line-desktop-mcp.git
+cd line-desktop-mcp
+npm ci --ignore-scripts
+npm test
+npm run check
+npm run build:release
 ```
 
-#### macOS
-
-1. **安裝 Node.js**
-   - 使用 Homebrew：`brew install node`
-   - 或從官網下載：https://nodejs.org/
-
-2. **（選擇性）安裝 cliclick**
-   - 如果有安裝 Homebrew，會於啟動時自動安裝
-   - 或手動安裝：`brew install cliclick`
-
-3. **設定 Claude Desktop**
-   - 開啟 Claude Desktop 設定檔
-   - 在 `mcpServers` 中加入以下設定：
-
-```json
-{
-  "mcpServers": {
-    "line-desktop-mcp": {
-      "command": "npx",
-      "args": ["line-desktop-mcp@latest"]
-    }
-  }
-}
-```
-
-### 進階設定
-
-#### Streamable HTTP 模式
-
-除了預設的 stdio 模式外，本專案也支援透過 Streamable HTTP 方式運行。此模式特別適合在 **n8n** 等支援 MCP 的平台中使用。
-
-**啟動 Streamable HTTP 模式：**
-
-```bash
-# 本機使用（僅 localhost）
-npx line-desktop-mcp@latest --http-mode --port 3000
-
-# 開放外部連線（需搭配 token）
-npx line-desktop-mcp@latest --http-mode --host 0.0.0.0 --port 3000 --token YOUR_SECRET
-```
-
-**參數說明：**
-- `--http-mode`：啟用 Streamable HTTP 模式，使用 HTTP streaming 而非 stdio
-- `--port <port>`：指定 HTTP 伺服器的 port（預設：3000）
-- `--host <host>`：指定綁定的網路介面（預設：`127.0.0.1`）
-- `--token <secret>`：設定 Bearer Token 驗證密鑰。當 `--host` 設為非 loopback 位址時為必填，以確保安全性
-
-**MCP 端點配置：**
-
-本機連接：
-```
-http://127.0.0.1:3000/mcp
-```
-
-Docker 中的 n8n 連接（同一台機器）：
-```
-http://host.docker.internal:3000/mcp
-```
-
-**傳輸方式：**
-- POST 請求：發送 JSON-RPC 訊息並透過 SSE stream 接收回應
-- 支援 session 管理，每個連接會獲得唯一的 session ID
-
-**n8n 工作流程範例：**
-
-如果您想在 n8n 中使用 LINE Desktop MCP，可以下載我們提供的範例工作流程檔案：
-- 📥 [下載 n8n 工作流程範例](doc_media/LINE-Desktop-MCP-Demo-chatbot-sample.json)
-
-此範例展示如何在 n8n 中整合 LINE Desktop MCP 建立聊天機器人工作流程。
-
-### 使用方式
-
-在 Claude Desktop 的對話中，您可以使用以下方式操作 LINE：
-
-#### 1. 讀取聊天內容
-
-```
-請幫我讀取 LINE 群組『專案討論』的訊息，並作出總結
-```
-
-#### 2. 發送訊息（手動確認）
-
-```
-請幫我撰寫一個問候，發送到 LINE 群組『專案討論』中
-```
-
-Claude 會先撰寫訊息內容，等待您確認後再發送。
-
-#### 3. 發送訊息（自動送出）
-
-```
-請幫我撰寫一個問候，發送到 LINE 群組『專案討論』中，並自動發送
-```
-
-Claude 會撰寫訊息並自動完成發送動作。
-
-### 使用注意事項
-
-#### 重要提醒
-
-1. **避免干擾自動化操作**  
-   本工具透過圖形使用者介面（GUI）進行自動化操作。在自動化程式執行期間，請勿同時使用滑鼠進行其他操作，以免干擾程式運作。
-
-2. **LINE Desktop 視窗配置要求**  
-   請確保 LINE Desktop 使用「展開聊天視窗」模式。在此模式下，聊天視窗會固定顯示在聊天室清單的右側，而非以獨立視窗方式開啟。
-
-3. **多顯示器環境配置**  
-   若您使用多個顯示器,請將 LINE Desktop 應用程式放置於主要顯示器（第一個顯示器）上,以確保自動化功能正常運作。
-
-### 授權條款
-
-本專案採用 MIT 授權條款 - 詳見 [LICENSE.md](LICENSE.md) 檔案
-
-### 作者
-
-**Geoffrey Wang**
-- GitHub: [@dtwang](https://github.com/dtwang)
-- Threads: [@geoff_spacetime](https://www.threads.com/@geoff_spacetime)
-
----
-
-## English
-
-Integrate AI tools with LINE Desktop through MCP (Model Context Protocol) to enable message reading and sending operations.
-
-![LINE Desktop MCP Demo with Claude Desktop](doc_media/line-desktop-demo-4x.gif)
-
-![LINE Desktop MCP Demo with n8n](doc_media/line-desktop-mcp-demo-n8n-2x.gif)
-
-### ⚠️ Important Notice
-
-**This project is NOT the official LINE line-bot-mcp-server**
-
-If you're looking for the official version, please visit: https://github.com/line/line-bot-mcp-server
-
-### Differences from Official Version
-
-- **Official line-bot-mcp-server**: Operates LINE Bot through LINE Messaging API
-- **This project line-desktop-mcp**: Directly operates LINE Desktop application on Windows or Mac through MCP
-
-### Important Disclaimer
-
-1. **This project is NOT officially affiliated with LINE**  
-   本專案與 LINE 官方無任何關聯。
-
-2. **No need to apply for LINE Developers or use Channel Access Token**  
-   This project operates through the already logged-in LINE Desktop application, without requiring developer account registration or API tokens.
-
-### About
-
-LINE Desktop MCP is an integration tool based on the Model Context Protocol that allows AI tools (such as Claude Desktop, n8n ) to interact directly with the LINE Desktop application. With this project, you can:
-
-- 📖 Read LINE chat messages
-- ✉️ Send LINE messages (manual or automatic)
-- 🤖 Integrate LINE into your AI workflows
-
-### Features
-
-- 🤖 **AI Integration**: Seamlessly integrate with AI tools like Claude Desktop, n8n through the MCP protocol
-- 💬 **Message Operations**: Support for reading and sending LINE messages
-- 🖥️ **Desktop Integration**: Direct interaction with the LINE Desktop application
-- 🔄 **Automation Support**: Choose between manual confirmation or automatic message sending
-
-### System Requirements
-
-#### Basic Requirements
-
-- **LINE Desktop**: v9.10 or above
-- **Operating System**:
-  - Windows 10 or above
-  - macOS Ventura 13.0 or above (requires AppleScript support)
-
-#### Integration with Claude Desktop
-
-- **Claude Desktop App**: Latest version
-- **Claude Subscription**: Pro plan
-
-#### Integration with n8n
-
-- **n8n**: Version with MCP support
-
-### Installation
-
-#### Windows
-
-1. **Install Node.js**
-   - Follow Microsoft's official guide: https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-windows
-
-2. **Install AutoHotkey v2**
-   - Download and install: https://www.autohotkey.com/
-
-3. **Configure Claude Desktop**
-   - Open Claude Desktop configuration file
-   - Add the following to `mcpServers`:
-
-```json
-{
-  "mcpServers": {
-    "line-desktop-mcp": {
-      "command": "npx",
-      "args": ["line-desktop-mcp@latest"]
-    }
-  }
-}
-```
-
-#### macOS
-
-1. **Install Node.js**
-   - Using Homebrew: `brew install node`
-   - Or download from: https://nodejs.org/
-
-2. **(Optional) Install cliclick**
-   - If Homebrew is installed, it will be automatically installed on startup
-   - Or install manually: `brew install cliclick`
-
-3. **Configure Claude Desktop**
-   - Open Claude Desktop configuration file
-   - Add the following to `mcpServers`:
-
-```json
-{
-  "mcpServers": {
-    "line-desktop-mcp": {
-      "command": "npx",
-      "args": ["line-desktop-mcp@latest"]
-    }
-  }
-}
-```
-
-### Advanced Configuration
-
-#### Streamable HTTP Mode
-
-In addition to the default stdio mode, this project also supports running via Streamable HTTP. This mode is particularly suitable for use with platforms like **n8n** that support MCP.
-
-**Start Streamable HTTP Mode:**
-
-```bash
-# Local use (localhost only)
-npx line-desktop-mcp@latest --http-mode --port 3000
-
-# Allow external connections (token required)
-npx line-desktop-mcp@latest --http-mode --host 0.0.0.0 --port 3000 --token YOUR_SECRET
-```
-
-**Parameters:**
-- `--http-mode`: Enable Streamable HTTP mode, using HTTP streaming instead of stdio
-- `--port <port>`: Specify the HTTP server port (default: 3000)
-- `--host <host>`: Specify the network interface to bind (default: `127.0.0.1`)
-- `--token <secret>`: Set Bearer Token authentication secret. Required when `--host` is set to a non-loopback address for security
-
-**MCP Endpoint Configuration:**
-
-Local connection:
-```
-http://127.0.0.1:3000/mcp
-```
-
-n8n in Docker (same machine):
-```
-http://host.docker.internal:3000/mcp
-```
-
-**Transport Method:**
-- POST requests: Send JSON-RPC messages and receive responses via SSE stream
-- Supports session management with unique session IDs for each connection
-
-**n8n Workflow Example:**
-
-If you want to use LINE Desktop MCP in n8n, you can download our sample workflow file:
-- 📥 [Download n8n Workflow Example](doc_media/LINE-Desktop-MCP-Demo-chatbot-sample.json)
-
-This example demonstrates how to integrate LINE Desktop MCP in n8n to create a chatbot workflow.
-
-### Usage
-
-In Claude Desktop conversations, you can interact with LINE in the following ways:
-
-#### 1. Read Chat Messages
-
-```
-Please read the messages from LINE group 'Project Discussion' and summarize them
-```
-
-#### 2. Send Messages (Manual Confirmation)
-
-```
-Please write a greeting and send it to LINE group 'Project Discussion'
-```
-
-Claude will compose the message and wait for your confirmation before sending.
-
-#### 3. Send Messages (Automatic)
-
-```
-Please write a greeting and send it to LINE group 'Project Discussion', and send it automatically
-```
-
-Claude will compose the message and automatically complete the sending action.
-
-### Usage Precautions
-
-#### Important Reminders
-
-1. **Avoid Interfering with Automation**  
-   This tool performs automation through the graphical user interface (GUI). During automated operations, please refrain from using the mouse for other tasks to prevent interference with the program's execution.
-
-2. **LINE Desktop Window Configuration**  
-   Please ensure that LINE Desktop is configured in "Expanded Chat Window" mode. In this mode, the chat window remains docked to the right side of the chat list, rather than opening as a separate independent window.
-
-3. **Multi-Monitor Setup**  
-   If you are using multiple monitors, please ensure that the LINE Desktop application is positioned on the primary display (first monitor) for the automation to function correctly.
-
-### License
-
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
-
-### Author
-
-**Geoffrey Wang**
-- GitHub: [@dtwang](https://github.com/dtwang)
-- Threads: [@geoff_spacetime](https://www.threads.com/@geoff_spacetime)
+`check`只握手與列工具，不呼叫LINE內容工具。發行檔在 `dist/`，附SHA256SUMS，已有同名檔案時拒絕覆寫。本fork沒有發布npm套件，請勿以上游同名npm套件代替。Windows adapter僅保留來源相容性，此版沒有Windows安裝包或實機保證。

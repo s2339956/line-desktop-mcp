@@ -19,10 +19,28 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { LineAutomation } from './automation/line-automation.js';
+import { desktopTools, desktopToolNames } from './desktop-tools.js';
+import { randomUUID } from 'node:crypto';
 
 // 取得當前模組的目錄路徑
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+// 協定版本直接沿用套件版本，避免安裝包與工具握手顯示不同版號。
+const { version: packageVersion } = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+
+// 只保留人工恢復需要的識別資訊，不把 native 私人內容放進 MCP error data。
+function recoveryDetails(error) {
+  const details = {};
+  if (typeof error.details?.operationId === 'string' && /^[a-f0-9-]{36}$/i.test(error.details.operationId)) {
+    details.operationId = error.details.operationId;
+  }
+  if (error.details?.needsRecovery === true) details.needsRecovery = true;
+  if (typeof error.details?.causeCode === 'string' && /^[A-Z0-9_]{1,64}$/.test(error.details.causeCode)) {
+    details.causeCode = error.details.causeCode;
+  }
+  return details;
+}
 
 // 首次執行時的設定檢查
 async function firstRunSetup() {
@@ -30,7 +48,7 @@ async function firstRunSetup() {
   
   // 如果已經設定過，跳過
   if (fs.existsSync(configMarker)) {
-    console.error('configMarker file exists=' + configMarker);
+    // 已完成安裝時保持安靜，不輸出使用者家目錄。
     return;
   }
 
@@ -90,34 +108,7 @@ async function firstRunSetup() {
     }
   }
   
-  // macOS: 檢查 cliclick
-  if (platform() === 'darwin') {
-    try {
-      execSync('which cliclick', { stdio: 'ignore' });
-      console.error('cliclick found');
-    } catch (firstError) {
-      console.error('cliclick not installed, attempting to install via Homebrew...');
-      
-      try {
-        // 使用 Homebrew 安裝 cliclick (不自動更新 Homebrew)
-        console.error('Installing cliclick with: brew install cliclick');
-        execSync('brew install cliclick', { 
-          stdio: ['ignore', 'ignore', 'inherit'],
-          env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: '1' }
-        });
-        
-        // 驗證安裝是否成功
-        execSync('which cliclick', { stdio: 'ignore' });
-        console.error('cliclick installed successfully');
-      } catch (secondError) {
-        console.error('ERROR: Failed to install cliclick automatically.');
-        console.error('Please ensure Homebrew is installed: https://brew.sh/');
-        console.error('Then manually install cliclick with: brew install cliclick');
-        console.error(`Error: ${secondError.message}`);
-        allDependenciesInstalled = false;
-      }
-    }
-  }
+  // macOS 改用惰性編譯的內建 Swift helper；協定啟動不應安裝套件或操作桌面。
 
   // 標記為已設定
   if (allDependenciesInstalled)
@@ -126,12 +117,12 @@ async function firstRunSetup() {
   console.error('Setup complete!');
 }
 
-class LineDesktopMCPServer {
-  constructor() {
+export class LineDesktopMCPServer {
+  constructor(lineAutomation = new LineAutomation(), { transport = 'stdio', sessionId = randomUUID() } = {}) {
     this.server = new Server(
       {
         name: 'line-desktop-mcp',
-        version: '1.0.0',
+        version: packageVersion,
       },
       {
         capabilities: {
@@ -140,7 +131,8 @@ class LineDesktopMCPServer {
       }
     );
 
-    this.lineAutomation = new LineAutomation();
+    this.lineAutomation = lineAutomation;
+    this.desktopContext = { transport, sessionId };
     this.setupToolHandlers();
   }
 
@@ -271,7 +263,9 @@ class LineDesktopMCPServer {
               },
               required: ['chatName', 'message'],
             },
-          }
+          },
+          // 舊 HTTP 安全模型不適合新增桌面操作；本次僅開放原有的五工具。
+          ...(this.desktopContext.transport === 'stdio' ? desktopTools : []),
         ]
       };
     });
@@ -281,6 +275,9 @@ class LineDesktopMCPServer {
       const { name, arguments: args } = request.params;
 
       try {
+        if (desktopToolNames.has(name)) {
+          return await this.handleDesktopTool(name, args);
+        }
         switch (name) {
           case 'get_line_chatroom_history_default':
             return await this.handleGetLineChatroomHistoryDefault(args);
@@ -306,96 +303,90 @@ class LineDesktopMCPServer {
       } catch (error) {
         throw new McpError(
           ErrorCode.InternalError,
-          `Error executing tool ${name}: ${error.message}`
+          `Error executing tool ${name}: ${error.message}`,
+          typeof error.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(error.code)
+            ? { automationCode: error.code, ...recoveryDetails(error) } : undefined
         );
       }
     });
   }
 
-  async handleGetLineChatroomHistoryDefault(args) {
-    const { chatName, date, messageLimit = 100 } = args;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+  async handleDesktopTool(name, args) {
+    try {
+      if (this.desktopContext.transport !== 'stdio') {
+        const error = new Error('新增桌面工具目前僅支援本機 stdio 連線。');
+        error.code = 'TRANSPORT_NOT_ALLOWED';
+        throw error;
+      }
+      const result = await this.lineAutomation.desktopCall(name, args ?? {}, this.desktopContext);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    } catch (error) {
+      // 不回傳 native script、剪貼簿或完整 AX tree，避免錯誤診斷洩漏私人內容。
+      const details = recoveryDetails(error);
+      return {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ error: {
+          code: typeof error.code === 'string' ? error.code : 'DESKTOP_OPERATION_FAILED',
+          message: typeof error.code === 'string' ? error.message : '桌面操作未完成，請檢查狀態後再繼續。',
+          ...(Object.keys(details).length ? { details } : {}),
+        } }) }],
+      };
+    }
+  }
 
-    const history = await this.lineAutomation.getChatHistory(chatName, targetDate, messageLimit, 10);
-    
-   // Ensure history is a string and handle null/undefined cases
-   // 限制回應內容長度，避免傳輸問題
-   const historyText = (history || '').slice(-50000); // 限制 50KB, 由後往前截取
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            chatName: chatName,
-            date: targetDate,
-            messageLimit: messageLimit,
-            history: historyText,
-            chatRoomUpdatedAt: new Date().toLocaleString()
-          }, null, 2),
-        }
-      ],
-    };
+  async readHistory(chatName, date, messageLimit, pages) {
+    if (typeof this.lineAutomation.getChatHistoryResult === 'function') {
+      return this.lineAutomation.getChatHistoryResult(chatName, date, messageLimit, pages);
+    }
+    return { history: await this.lineAutomation.getChatHistory(chatName, date, messageLimit, pages),
+      metadata: { complete: false, reasons: ['legacy_backend_without_completeness_evidence'] } };
+  }
+
+  async handleGetLineChatroomHistoryDefault(args) {
+    return this.handleHistory(args, 10);
   }
 
   async handleGetLineChatroomHistoryLong(args) {
-    const { chatName, date, messageLimit = 100 } = args;
-    const targetDate = date || new Date().toISOString().split('T')[0];
-
-    const history = await this.lineAutomation.getChatHistory(chatName, targetDate, messageLimit, 50);
-    
-   // Ensure history is a string and handle null/undefined cases
-   // 限制回應內容長度，避免傳輸問題
-   const historyText = (history || '').slice(-50000); // 限制 50KB, 由後往前截取
-    
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            chatName: chatName,
-            date: targetDate,
-            messageLimit: messageLimit,
-            history: historyText,
-            chatRoomUpdatedAt: new Date().toLocaleString(),
-          }, null, 2),
-        },
-      ],
-    };
+    return this.handleHistory(args, 50);
   }
 
   async handleGetLineChatroomHistoryShort(args) {
-    const { chatName, date, messageLimit = 100 } = args;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    return this.handleHistory(args, 5);
+  }
 
-    const history = await this.lineAutomation.getChatHistory(chatName, targetDate, messageLimit, 5);
-    
-   // Ensure history is a string and handle null/undefined cases
-   // 限制回應內容長度，避免傳輸問題
-   const historyText = (history || '').slice(-50000); // 限制 50KB, 由後往前截取
-    
-    
+  async handleHistory(args, pages) {
+    const { chatName, date, messageLimit = 100 } = args;
+    const now = new Date();
+    // LINE 的日曆日期是電腦本地日期，不能以 UTC 在午夜前後換日。
+    const localDate = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+    const targetDate = date || localDate;
+    const result = await this.readHistory(chatName, targetDate, messageLimit, pages);
+    const history = typeof result.history === 'string' ? result.history : '';
+    const responseTruncated = history.length > 50000;
+    // 更新時間來自 MCP 本機請求，避免誤標成 LINE 訊息時間。
+    const metadata = { ...result.metadata, responseTruncated,
+      chatRoomUpdatedAtSource: 'mcp_local_request_time' };
+    if (responseTruncated) {
+      metadata.complete = false;
+      metadata.reasons = [...new Set([...(metadata.reasons || []), 'response_character_limit'])];
+    }
     return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            chatName: chatName,
-            date: targetDate,
-            messageLimit: messageLimit,
-            history: historyText,
-            chatRoomUpdatedAt: new Date().toLocaleString(),
-          }, null, 2),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({
+        chatName, date: targetDate, messageLimit,
+        history: history.slice(-50000),
+        chatRoomUpdatedAt: now.toLocaleString(), metadata,
+      }, null, 2) }],
     };
   }
 
-  async handleSendMessage(args) {
+  async handleSendMessage(args, autoSend = false) {
     const { chatName, message } = args;
     
-    const result = await this.lineAutomation.sendChatMessage(chatName, message, false);
+    const result = await this.lineAutomation.sendChatMessage(chatName, message, autoSend);
+    // 視窗送出只證明 UI 已提交，不能把輸入區清空包裝成 LINE 伺服器送達。
+    const receipt = ['DRAFT_WRITTEN', 'UI_SUBMITTED'].includes(result.receipt?.status)
+      ? { status: result.receipt.status, deliveryConfirmed: false,
+        observedAt: result.receipt.observedAt } : undefined;
     
     return {
       content: [
@@ -407,6 +398,7 @@ class LineDesktopMCPServer {
             message,
             timestamp: new Date().toISOString(),
             error: result.error || null,
+            ...(receipt ? { receipt } : {}),
           }, null, 2),
         },
       ],
@@ -414,28 +406,12 @@ class LineDesktopMCPServer {
   }
 
   async handleSendMessageAuto(args) {
-    const { chatName, message } = args;
-    
-    const result = await this.lineAutomation.sendChatMessage(chatName, message,  true);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            success: result.success,
-            chatName,
-            message,
-            timestamp: new Date().toISOString(),
-            error: result.error || null,
-          }, null, 2),
-        },
-      ],
-    };
+    return this.handleSendMessage(args, true);
   }
 
 
   async run(useSSE = false, port = 3000, host = '127.0.0.1', token = null) {
+    this.desktopContext.transport = useSSE ? 'http' : 'stdio';
     if (useSSE) {
       // 使用 Streamable HTTP 模式（符合 MCP 2025-06-18 規範）
       const app = express();
@@ -486,7 +462,7 @@ class LineDesktopMCPServer {
         res.json({
           status: 'running',
           server: 'LINE Desktop MCP Server',
-          version: '1.0.0',
+          version: packageVersion,
           mcp_endpoint: endpoint,
           transport: 'Streamable HTTP (MCP 2025-06-18)'
         });
@@ -517,7 +493,7 @@ class LineDesktopMCPServer {
             
           } else if (req.method === 'POST' && req.body?.method === 'initialize') {
             // 新的初始化請求
-            console.error(`Body:`, JSON.stringify(req.body));
+            // 不記錄client初始化內容，避免帳號或路徑進入診斷log。
             console.error('Creating new StreamableHTTP transport');
             
             transport = new StreamableHTTPServerTransport({
@@ -591,8 +567,7 @@ class LineDesktopMCPServer {
 }
 
 // 解析命令列參數
-function parseArgs() {
-  const args = process.argv.slice(2);
+export function parseArgs(args = process.argv.slice(2)) {
   const config = {
     sseMode: false,
     port: 3000,
@@ -618,27 +593,34 @@ function parseArgs() {
   return config;
 }
 
-// 首次執行時的設定檢查
-await firstRunSetup();
+export async function main(args = process.argv.slice(2)) {
+  // 匯入模組只提供 factory；只有直接啟動 CLI 才執行原設定流程。
+  if (args.includes('--version')) { console.log(packageVersion); return; }
+  await firstRunSetup();
+  const config = parseArgs(args);
 
-// 解析命令列參數並啟動伺服器
-const config = parseArgs();
-
-// 安全檢查：非 loopback 綁定必須提供 token
-if (config.sseMode && config.host !== '127.0.0.1' && config.host !== 'localhost') {
-  if (!config.token) {
-    console.error('ERROR: Binding to a non-loopback address requires --token <secret> for authentication.');
-    console.error('  Example: npx line-desktop-mcp --http-mode --host 0.0.0.0 --port 3000 --token MY_SECRET');
-    process.exit(1);
+  // 保留原 HTTP 綁定規則；新增桌面工具另有 stdio-only gate。
+  if (config.sseMode && config.host !== '127.0.0.1' && config.host !== 'localhost') {
+    if (!config.token) {
+      throw new Error('Binding to a non-loopback address requires --token <secret> for authentication.');
+    }
   }
+  const server = new LineDesktopMCPServer(undefined, { transport: config.sseMode ? 'http' : 'stdio' });
+
+  if (config.sseMode) {
+    console.error(`Starting server in Streamable HTTP mode on ${config.host}:${config.port}`);
+    await server.run(true, config.port, config.host, config.token);
+  } else {
+    console.error('Starting server in stdio mode');
+    await server.run(false);
+  }
+  return server;
 }
 
-const server = new LineDesktopMCPServer();
-
-if (config.sseMode) {
-  console.error(`Starting server in  Streamable HTTP  mode on ${config.host}:${config.port}`);
-  server.run(true, config.port, config.host, config.token).catch(console.error);
-} else {
-  console.error('Starting server in stdio mode');
-  server.run(false).catch(console.error);
+// 支援 npm bin 的 symlink；測試 import 不會啟程序、安裝或修改使用者設定。
+if (process.argv[1] && fs.existsSync(process.argv[1]) && fs.realpathSync(process.argv[1]) === __filename) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
 }

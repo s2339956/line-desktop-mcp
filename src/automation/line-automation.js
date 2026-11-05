@@ -1,16 +1,19 @@
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { MacOSDesktopAutomation, UnsupportedDesktopAutomation } from './desktop-automation.js';
 import { MacOSLineAutomation } from './macos-line-automation.js';
 import { WindowsLineAutomation } from './windows-line-automation.js';
 
 export class LineAutomation {
-  constructor() {
-    this.platform = process.platform;
-        
-    if (this.platform === 'darwin') {
-      this.automation = new MacOSLineAutomation();
+  constructor({ platform = process.platform, automation, desktop } = {}) {
+    this.platform = platform;
+
+    if (automation) {
+      this.automation = automation;
+      this.desktop = desktop || automation.desktop || new UnsupportedDesktopAutomation();
+    } else if (this.platform === 'darwin') {
+      this.desktop = desktop || new MacOSDesktopAutomation();
+      this.automation = new MacOSLineAutomation({ desktop: this.desktop });
     } else if (this.platform === 'win32') {
+      this.desktop = desktop || new UnsupportedDesktopAutomation();
       this.automation = new WindowsLineAutomation();
     } else {
       throw new Error(`Unsupported platform: ${this.platform}`);
@@ -34,57 +37,43 @@ export class LineAutomation {
   }
 
   async getChatHistory(chatName, date, messageLimit = 100, pageUpTimes = 10) {
+    return (await this.getChatHistoryResult(chatName, date, messageLimit, pageUpTimes)).history;
+  }
 
-    await this.automation.switchToEnglish();
-    await this.automation.activateLine();
-    const ok = await this.automation.selectChat(chatName);
-
-    if (!ok) throw new Error(`Chat "${chatName}" not found`);
-
-    await this.automation.pageUp(pageUpTimes);
-
-    const chatHistory = await this.automation.copyAllChatToClipboard();
-
-    if ( process.env.CHAT_LOG_ON==='true' ) {
-      try {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        // Remove only filesystem-unsafe characters, preserve CJK characters
-        const safeChatName = chatName.replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, '_');
-        const fileName = `${safeChatName}_${timestamp}.txt`;
-        
-        let logDir = '';
-
-        if( process.env.CHAT_LOG_PATH ) {
-           logDir = process.env.CHAT_LOG_PATH;
-        }
-        else
-        {
-           logDir = path.join(process.cwd(), 'logs');
-        }
-
-        if (!fs.existsSync(logDir)) {
-          fs.mkdirSync(logDir, { recursive: true });
-        }
-
-        const logFilePath = path.join(logDir, fileName);
-        fs.writeFileSync(logFilePath, chatHistory);
-        console.error(`Chat history saved to ${logFilePath}`);
-      } catch (error) {
-        console.error('Failed to write chat history to log file:', error);
-      }
+  async getChatHistoryResult(chatName, date, messageLimit = 100, pageUpTimes = 10) {
+    let result;
+    if (typeof this.automation.getChatHistoryResult === 'function') {
+      result = await this.automation.getChatHistoryResult(chatName, date, messageLimit, pageUpTimes);
+    } else {
+      await this.automation.switchToEnglish();
+      await this.automation.activateLine();
+      const ok = await this.automation.selectChat(chatName);
+      if (!ok) throw new Error(`Chat "${chatName}" not found`);
+      await this.automation.pageUp(pageUpTimes);
+      result = {
+        history: await this.automation.copyAllChatToClipboard(),
+        metadata: { complete: false, reasons: ['LEGACY_ADAPTER'], mayAffectReadState: true },
+      };
     }
+    if (typeof result?.history !== 'string' || !result.metadata || typeof result.metadata !== 'object') {
+      throw new Error('History adapter returned an invalid result');
+    }
+    const chatHistory = result.history;
 
-    return chatHistory;
+    // 發行版不提供聊天正文落盤log，避免沿用本機診斷環境變數而外流。
+
+    return result;
   }
 
   async sendChatMessage(chatName, message, autoSend = false) {
-
+    if (typeof this.automation.sendChatMessage === 'function') {
+      return this.automation.sendChatMessage(chatName, message, autoSend);
+    }
     await this.automation.switchToEnglish();
     await this.automation.activateLine();
     const ok = await this.automation.selectChat(chatName);
     if (!ok) throw new Error(`Chat "${chatName}" not found`);
-
-    return await this.automation.sendMessage(chatName, message, autoSend);
+    return this.automation.sendMessage(chatName, message, autoSend);
   }
 
   async getChatList(includeGroups = true, includeIndividual = true) {
@@ -97,5 +86,9 @@ export class LineAutomation {
 
   async activateLine() {
     return await this.automation.activateLine();
+  }
+
+  async desktopCall(name, args, context = {}) {
+    return this.desktop.call(name, args, context);
   }
 }

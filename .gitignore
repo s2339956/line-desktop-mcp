@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-package-lock.json
+LEDGER.md
 yarn.lock
 pnpm-lock.yaml
 
@@ -52,3 +52,15 @@ temp/
 
 # Debug
 .vscode-test/
+.line-ax-mode-trial/
+
+# Local-only acceptance artifacts and generated absolute-path configuration
+logs/
+dev-notes/
+docs/plans/
+*-report.md
+mcp-config.json
+*.backup-*
+*.receipt.json
+pending-operation.json
+mcp-config.json.tmp-*

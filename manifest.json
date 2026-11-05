@@ -1,20 +1,20 @@
 {
   "manifest_version": "0.2",
   "name": "line-desktop-mcp",
-  "display_name": "LINE Desktop MCP",
-  "version": "1.0.21",
-  "description": "MCP Server for LINE Desktop Automation via GUI scripting",
+  "display_name": "LINE Desktop MCP for macOS",
+  "version": "1.2.0",
+  "description": "macOS LINE Desktop MCP：AI agent 本機文字、圖片與有界歷史整合",
   "author": {
-    "name": "Geoffrey Wang",
-    "url": "https://github.com/dtwang"
+    "name": "s2339956",
+    "url": "https://github.com/s2339956"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dtwang/line-desktop-mcp"
+    "url": "https://github.com/s2339956/line-desktop-mcp.git"
   },
-  "homepage": "https://github.com/dtwang/line-desktop-mcp#readme",
-  "support": "https://github.com/dtwang/line-desktop-mcp/issues",
+  "homepage": "https://github.com/s2339956/line-desktop-mcp#readme",
+  "support": "https://github.com/s2339956/line-desktop-mcp/issues",
   "keywords": [
     "mcp",
     "line",
@@ -27,19 +27,19 @@
     "type": "node",
     "entry_point": "src/server.js",
     "mcp_config": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "line-desktop-mcp@latest"
+        "${__dirname}/src/server.js"
       ]
     }
   },
   "compatibility": {
     "platforms": [
-      "darwin",
-      "win32"
+      "darwin"
     ],
     "runtimes": {
-      "node": ">=18.0.0"
+      "node": ">=22.0.0"
     }
-  }
+  },
+  "tools_generated": true
 }

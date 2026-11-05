@@ -28,9 +28,10 @@ test/
 *.test.js
 *.spec.js
 
-# Documentation (optional - remove if you want to include)
-docs/
+# 大型示範媒體不納入套件；Markdown 操作文件隨套件提供。
 doc_media/
+docs/plans/
+docs/*-report.md
 
 # Build artifacts
 dist/

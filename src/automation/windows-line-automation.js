@@ -6,11 +6,13 @@ import path from 'path';
 import os from 'os';
 import iconv from 'iconv-lite';
 import chardet from 'chardet';
+import { AutomationError } from './automation-error.js';
+import { OperationLock } from './operation-lock.js';
 
 const execAsync = promisify(exec);
 
 export class WindowsLineAutomation {
-  constructor() {
+  constructor({ lock = new OperationLock() } = {}) {
     this.lineAppName = 'LINE';
     this.lineWinTitle = 'LINE';
     this.delayShort = 200; // for key stroke, mouse click simulation human-like
@@ -18,6 +20,7 @@ export class WindowsLineAutomation {
     this.delayMidLong = 1200; // for mid data loading
     this.delayLong = 3000; // for long data loading
     this.ahkPath = 'autohotkey'; // Assume AutoHotkey v2 is in PATH
+    this.lock = lock;
   }
 
   /**
@@ -230,6 +233,48 @@ ${script}
     console.warn("Switching to English on Windows is not reliably implemented. Assuming correct input method is active.");
     // await this.runAhk(script);
     return;
+  }
+
+  async getChatHistoryResult(chatName, date, messageLimit = 100, pageUpTimes = 10) {
+    return this.lock.withLock(async () => {
+      await this.switchToEnglish();
+      const activated = await this.activateLine();
+      if (!activated?.success) throw new AutomationError('LINE_ACTIVATION_FAILED', '無法將 LINE 置於前景');
+      if (!(await this.selectChat(chatName))) {
+        throw new AutomationError('CHAT_NOT_FOUND', '找不到或無法可靠選取完全同名聊天室');
+      }
+      await this.pageUp(pageUpTimes);
+      const rawHistory = await this.copyAllChatToClipboard();
+      if (typeof rawHistory !== 'string' || rawHistory.length === 0 || rawHistory.startsWith('ERROR:')) {
+        throw new AutomationError('HISTORY_UNAVAILABLE', '無法可靠讀取聊天內容');
+      }
+      // 一則訊息可能跨多行；不能為套用筆數而截掉舊 Windows 呼叫者原本會收到的內容。
+      const reasons = ['VISIBLE_CLIPBOARD_CONTENT_ONLY', 'MESSAGE_LIMIT_UNAVAILABLE'];
+      if (date) reasons.push('DATE_FILTER_UNAVAILABLE');
+      return {
+        history: rawHistory,
+        metadata: {
+          complete: false,
+          reasons,
+          mayAffectReadState: true,
+          messageLimitApplied: false,
+          dateFilterApplied: false,
+          observedAt: new Date().toISOString(),
+        },
+      };
+    });
+  }
+
+  async sendChatMessage(chatName, message, autoSend = false) {
+    return this.lock.withLock(async () => {
+      await this.switchToEnglish();
+      const activated = await this.activateLine();
+      if (!activated?.success) throw new AutomationError('LINE_ACTIVATION_FAILED', '無法將 LINE 置於前景');
+      if (!(await this.selectChat(chatName))) {
+        throw new AutomationError('CHAT_NOT_FOUND', '找不到或無法可靠選取完全同名聊天室');
+      }
+      return this.sendMessage(chatName, message, autoSend);
+    });
   }
 
   async sendMessage(chatName, message, autoSend = false) {
