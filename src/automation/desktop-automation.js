@@ -694,6 +694,7 @@ export class MacOSDesktopAutomation {
     ),
     recoveryEvidenceDirectory,
     requests,
+    attachmentSettle,
   } = {}) {
     this.bridge = bridge;
     this.lock = lock;
@@ -713,6 +714,7 @@ export class MacOSDesktopAutomation {
     this.recoveryEvidenceDirectory = recoveryEvidenceDirectory ||
       path.join(path.dirname(journalPath), 'recovery-evidence');
     this.requests = requests || new RequestReceipts(path.join(path.dirname(journalPath), 'requests'));
+    this.attachmentSettle = attachmentSettle;
     this.recoveryLatch = null;
     this.plans = new Map();
     this.cursors = new Map();
@@ -1823,6 +1825,7 @@ export class MacOSDesktopAutomation {
 
   async sendAttachments(args, kind) {
     return sendAttachmentBatch({ args, kind, bridge: this.bridge, lock: this.lock, records: this.requests,
+      settle: this.attachmentSettle,
       journal: {
         assertEmpty: () => this.assertNoPendingJournal(),
         write: record => this.writeJournal(record),

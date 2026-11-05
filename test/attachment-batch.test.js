@@ -22,7 +22,9 @@ async function fixture(t, handler) {
     files.push({ filePath, fileSha256: digest(data) });
   }
   const calls = [];
+  let settles = 0;
   const desktop = new MacOSDesktopAutomation({ journalPath: path.join(directory, 'pending.json'),
+    attachmentSettle: async () => { settles++; },
     lock: { withLock: work => work() }, bridge: { async call(name, args) {
       calls.push({ name, args });
       return handler ? handler(name, args, calls) : receipt(args);
@@ -36,7 +38,7 @@ async function fixture(t, handler) {
     }
     await fs.rm(directory, { recursive: true, force: true });
   });
-  return { directory, files, calls, desktop };
+  return { directory, files, calls, desktop, settles: () => settles };
 }
 
 function receipt(args) {
@@ -53,6 +55,7 @@ test('多檔依順序直接提交，保留檔名與內容，重複requestId不�
   const result = await f.desktop.call('line_send_files', args, context);
   assert.equal(result.completedCount, 3);
   assert.equal(f.calls.length, 3);
+  assert.equal(f.settles(), 2);
   for (const [index, call] of f.calls.entries()) {
     assert.equal(call.name, 'sendFile');
     assert.equal(path.basename(call.args.filePath), path.basename(f.files[index].filePath));

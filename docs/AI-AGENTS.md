@@ -20,7 +20,7 @@ AI agent須支援 **本機MCP stdio**；服務、LINE與桌面權限須在同一
 }
 ```
 
-`CHAT_LOG_ON`僅保留設定相容性；1.3.0已移除聊天正文寫檔。不將生成的個人設定上傳公開issue。若只需產生設定、不安裝或編譯，可用 `node scripts/setup-mac.mjs --config-only`。
+`CHAT_LOG_ON`僅保留設定相容性；1.4.0已移除聊天正文寫檔。不將生成的個人設定上傳公開issue。若只需產生設定、不安裝或編譯，可用 `node scripts/setup-mac.mjs --config-only`。
 
 ## Codex
 
@@ -68,4 +68,14 @@ UI操作前提醒使用者暫停鍵鼠及其他桌面自動化。
 
 工具本機執行；讀取內容仍會交給你選用的client／模型。不要讓agent讀取不願交給該模型的內容。
 
-1.3.0起，先用line_doctor了解功能相容性。文字與單圖發送請產生穩定requestId，網路重連仍沿用同編號；不明狀態先查line_operation_status，只有使用者觀察結果後才做line_resolve_operation。不要換新編號自動重送同一操作。
+1.4.0起，先用line_doctor了解功能相容性。文字與單圖發送請產生穩定requestId，網路重連仍沿用同編號；不明狀態先查line_operation_status，只有使用者觀察結果後才做line_resolve_operation。不要換新編號自動重送同一操作。
+
+## 多圖與一般檔案（直接提交）
+
+新工具不等待逐項確認。使用者已明確指定對話與附件時，建立一個穩定requestId，直接呼叫：
+
+```json
+{"chatName":"指定對話","requestId":"產生至少16位的穩定請求編號","files":[{"filePath":"/absolute/path/to/document.pdf","fileSha256":"原始位元組的64位小寫SHA256"}]}
+```
+
+多圖改用line_send_images，陣列名images，每項imagePath／imageSha256。不要傳caption或autoSend；檔案不轉圖。先確定目前LINE對話正確、輸入區沒有待送草稿，並暫停鍵鼠。partial或不明都不得自動重送整批；只回報已驗證的數量與停止位置。原LINE版本、主窗及輸入防護維持不變。

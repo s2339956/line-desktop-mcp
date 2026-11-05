@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "line-desktop-mcp",
   "display_name": "LINE Desktop MCP for macOS",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "macOS LINE Desktop MCP：AI agent 本機文字、圖片與有界歷史整合",
   "author": {
     "name": "s2339956",

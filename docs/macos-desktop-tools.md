@@ -1,6 +1,6 @@
 # macOS 工具與限制
 
-1.3.0統一入口為 `src/server.js`。stdio提供18工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
+1.4.0統一入口為 `src/server.js`。stdio提供20工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -36,10 +36,22 @@
 
 權限須給真正啟動服務的client／終端機。LINE須登入、未鎖定且視窗可見；延伸螢幕仍受可辨識結構限制。LINE版本、語言、縮放或配置變更可能使工具拒絕操作，不放寬核對作備援。已驗環境見 [TESTING](TESTING.md)。
 
-## 1.3.0 健檢與請求紀錄
+## 1.4.0 健檢與請求紀錄
 
 `line_doctor {probeNative:false}`或`npm run doctor`不編譯、不操作LINE，列出版本與相容性；`probeNative:true`或CLI加`--native`才呼叫原生權限探針，可能首次編譯，完全不讀對話。`uiReadinessConfirmed`僅表示權限與程序基本條件，不取代發送前的完整視窗核對。未驗證版本不放寬indexed profile。
 
 文字manual／auto與單圖工具可傳16–128位英數、底線或連字號的`requestId`。同編號須保持內容與模式不變；已完成時回既有回條且`replayed:true`。持久化資料只有雜湊、狀態及必要回條，不保存路徑、對話名或文字。無編號的舊呼叫維持原行為。
 
 `line_operation_status {requestId}`查詢狀態。只有使用者已人工觀察結果時，才使用`line_resolve_operation {requestId,operationId,outcome:"submitted"或"abandoned"}`。工具不判斷對方收到或已讀；先封存精確journal並比對穩定主窗，原請求永久不可重送。`submitted`是使用者回報，不能冒充UI驗證回條；不會清除別的操作。
+
+## 1.4.0 多圖與一般檔案直送
+
+`line_send_images`必填chatName、requestId、images陣列，每項imagePath與imageSha256。`line_send_files`必填chatName、requestId、files陣列，每項filePath與fileSha256。每批1–10項；圖片每張20MiB，整批附件總計100MiB；同一批不接受重複內容。沒有autoSend、caption、PDF轉換或確認／取消參數，正常情況直接按順序送出。
+
+每項先建立私有、SHA綁定的完整快照；全批都通過才開始UI。一般檔案保留原始位元組與檔名（Unicode採標準等價正規化），PDF可當一般檔案傳送，不轉成圖片；圖片沿用既有PNG/JPEG解碼與重編碼。
+
+需先由使用者打開指定對話；工具只在鍵鼠閒置、主窗與簽章核對後啟用現有LINE，不搜尋或切換對話。項目間自動等待自己的事件離開2秒idle窗口，下一項仍核對硬體輸入；這不是等待使用者確認。若client工具逾時較短，大批附件請將該次呼叫預算設為至少120秒，並先完成Mac安裝的預編譯。
+
+success:true代表本批均已UI_SUBMITTED。success:false、partial:true代表已驗證的前綴送出，failedIndex為0起算、completedCount是已驗證數量；不會送後項，也不重送前綴。不明則回OPERATION_UNCERTAIN，請用原requestId查line_operation_status，不換新編號自動重送。若清除journal失敗，已保存回條仍有效，狀態會提示needsRecovery。
+
+一般檔案的原生核對依據為已驗NSOpenPanel、完整GoTo路徑、含SHA的私有目錄、唯一檔名Info首行、檔案位元組SHA及唯一Open按鈕。已用獨立標準NSOpenPanel的合成TXT及ZIP核對結構；這不等同已在LINE向真人提交每種檔案。

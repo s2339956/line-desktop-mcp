@@ -96,7 +96,8 @@ function verifiedReceipt(result, item, kind) {
   return sanitizeReceipt(result);
 }
 
-export async function sendAttachmentBatch({ args, kind, bridge, lock, records, journal }) {
+export async function sendAttachmentBatch({ args, kind, bridge, lock, records, journal,
+  settle = () => new Promise(resolve => setTimeout(resolve, 2100)) }) {
   const request = validateBatch(args, kind);
   return lock.withLock(() => records.run(request.requestId, request.actionHash,
     async ({ operationId, commit, checkpoint }) => {
@@ -138,6 +139,8 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
               : await bridge.call('sendFile', { chatName: request.chatName, filePath: item.file, fileSha256: item.sha256 });
             completed.push(verifiedReceipt(result, item, kind));
             await checkpoint(summary(false));
+            // 讓本次合成鍵鼠事件離開2秒idle窗口；下一項仍完整核對硬體活動，不自動重試。
+            if (index + 1 < staged.length) await settle();
           } catch (error) {
             if (error.details?.phase === 'pre_commit') {
               if (!completed.length) { retainFiles = false; await clearJournal(); throw error; }

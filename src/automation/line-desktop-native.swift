@@ -8796,6 +8796,25 @@ func sendFile(_ args: [String: Any]) throws -> [String: Any] {
     }
 }
 
+func prepareAttachmentForeground() throws {
+    let (app, _, _, expected) = try mainWindow(requireForeground: false)
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier else { return }
+    guard globalAllInputReady(), CGPreflightPostEventAccess() else {
+        throw NativeFailure("PHYSICAL_INPUT_BUSY", "請暫停鍵鼠後再執行附件傳送")
+    }
+    let signing = try strictLineSigningInfo(app.executableURL!)
+    guard strictLineIdentityFields(executablePath: expected.executableURL,
+                                   identifier: signing.0, team: signing.1, codeValid: true),
+          app.activate(options: [.activateAllWindows]) else {
+        throw NativeFailure("LINE_IDENTITY_MISMATCH", "無法啟用已驗證的LINE主視窗")
+    }
+    let deadline = ProcessInfo.processInfo.systemUptime + 1
+    while NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier &&
+          ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.02) }
+    let (_, _, _, current) = try mainWindow(requireForeground: true)
+    guard sameWindow(current, expected) else { throw NativeFailure("WINDOW_CHANGED", "啟用LINE後主視窗已變更") }
+}
+
 func submitAttachment(chat: String, autoSend: Bool, stage: () throws -> ImageSendAsset) throws -> [String: Any] {
     var inputAttempted = false
     var staged: ImageSendAsset?
@@ -8806,6 +8825,9 @@ func submitAttachment(chat: String, autoSend: Bool, stage: () throws -> ImageSen
     do {
         let asset = try stage()
         staged = asset
+        // 只啟用已驗證、已開啟的同一視窗；不搜尋或切換對話，不加確認關卡。
+        try requireIndexedUIVersion()
+        try prepareAttachmentForeground()
         let (identity, parent, point) = try imageSendTarget(chat)
         let targetROI = CGRect(x: point.x - 10, y: point.y - 10, width: 20, height: 20)
         _ = try verifyIndexedHeader(chat, expected: identity)
