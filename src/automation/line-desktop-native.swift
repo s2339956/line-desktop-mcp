@@ -11627,16 +11627,20 @@ func runSelfTests() throws -> [String: Any] {
     let retainedMapped = canonicalReadOCRCandidates(
         [noisyAll] + retainedInvalid, imageWidth: 907, imageHeight: 39
     )
+    // 較舊Swift對zip、閉包與布林鏈同時推導成本過高；拆開但保留全部檢查。
+    let retainedOriginal: [OCRCandidate] = [noisyAll] + retainedInvalid
+    let retainedValuesUnchanged: Bool = zip(retainedMapped, retainedOriginal).allSatisfy { pair in
+        pair.0.text == pair.1.text && pair.0.confidence == pair.1.confidence
+    }
+    let retainedInvalidUnchanged: Bool = retainedMapped.dropFirst().allSatisfy { candidate in
+        !validNormalizedBox(candidate.normalizedBox)
+    }
+    let retainedFrame = rawSelectedFrame(candidates: retainedMapped, masked: retainedMapped,
+                                        imageWidth: 907, imageHeight: 39, underlines: [noisyUnderline])
+    let retainedNoFalseMatch: Bool = allNavigationExactMatches("全部", in: retainedFrame).isEmpty
     checks["global-all-rgb-invalid-retained"] = retainedMapped.count == 5 &&
-        zip(retainedMapped, [noisyAll] + retainedInvalid).allSatisfy {
-            $0.0.text == $0.1.text && $0.0.confidence == $0.1.confidence
-        } && retainedMapped.dropFirst().allSatisfy {
-            !validNormalizedBox($0.normalizedBox)
-        } && allNavigationExactMatches(
-            "全部", in: rawSelectedFrame(candidates: retainedMapped, masked: retainedMapped,
-                                          imageWidth: 907, imageHeight: 39,
-                                          underlines: [noisyUnderline])
-        ).isEmpty
+        retainedValuesUnchanged && retainedInvalidUnchanged && retainedNoFalseMatch
+
     let realRawBox = CGRect(x: 0.010968365855853496, y: 0.44510646650742003,
                             width: 0.0485483245177416, height: 0.40566396713256847)
     let realProcessedBox = CGRect(x: 0.011627906754786988, y: 0.49999999588801458,
