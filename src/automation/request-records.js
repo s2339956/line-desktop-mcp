@@ -98,7 +98,8 @@ export class RequestReceipts {
     const record = await this.read(requestId);
     if (!record || record.operationId !== operationId) throw new AutomationError('RECOVERY_RECORD_INVALID', '不是指定請求的操作');
     const resolvedState = outcome === 'submitted' ? 'user_reported_submitted' : 'abandoned';
-    if (terminal.has(record.state) && record.state !== resolvedState && record.state !== 'succeeded') {
+    if (terminal.has(record.state) && record.state !== resolvedState && record.state !== 'succeeded' &&
+        !(record.state === 'partial' && outcome === 'abandoned')) {
       throw new AutomationError('RECOVERY_RECORD_INVALID', '請求已以不同結果結案');
     }
     if (record.state === 'succeeded' && outcome !== 'submitted') throw new AutomationError('RECOVERY_RECORD_INVALID', '已驗證提交不能改為未提交');
@@ -120,8 +121,8 @@ export class RequestReceipts {
       await syncDirectory(evidence);
     }
     // 先使原requestId永久停止，再清除已核對的journal；不提供任何重送動作。
-    await writePrivateJSON(this.file(requestId), { ...record,
-      state: record.state === 'succeeded' ? 'succeeded' : resolvedState });
+    const finalState = ['succeeded', 'partial'].includes(record.state) ? record.state : resolvedState;
+    await writePrivateJSON(this.file(requestId), { ...record, state: finalState });
     if (journal) {
       const current = await readPrivateJSON(journalPath);
       if (!current || !current.raw.equals(journal.raw)) throw new AutomationError('LOCAL_RECORD_CHANGED', '操作紀錄已改變');
@@ -129,6 +130,6 @@ export class RequestReceipts {
       await syncDirectory(path.dirname(journalPath));
     }
     return { resolved: true, sendAttempted: false, outcomeSource: 'user_report',
-      state: record.state === 'succeeded' ? 'succeeded' : resolvedState };
+      state: finalState };
   }
 }
