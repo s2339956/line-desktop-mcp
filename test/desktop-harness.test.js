@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseDesktopArgs, checkDesktop } from '../scripts/check-desktop.mjs';
+import { AutomationError } from '../src/automation/automation-error.js';
 import { WindowsLineAutomation } from '../src/automation/windows-line-automation.js';
 
 function nativeFailureMessages(code) {
@@ -88,8 +89,8 @@ test('page mode 只保留 code-scoped 已知分類，未知／跨 code／incomin
     read: true, page: true, tabName: 'Test tab', chatName: 'Test chat',
   }, () => ({ async call(name) {
     if (name === 'line_desktop_status') return { usable: true, foreground: true };
-    throw Object.assign(new Error(message), { code,
-      details: { causeCode: 'PRIVATE_DETAIL_CANARY', rawAX: 'PRIVATE_AX_CANARY' } });
+    // 模擬NativeBridge受控錯誤；一般Error現在須遮蔽訊息，不再冒充原生語意。
+    throw new AutomationError(code, message, { causeCode: 'PRIVATE_DETAIL_CANARY', rawAX: 'PRIVATE_AX_CANARY' });
   } }));
   for (const [code, message, causeCode] of [
     ['SEMANTIC_UNRELIABLE', '無法唯一辨識訊息輸入區', 'LAYOUT_COMPOSER_NOT_UNIQUE'],

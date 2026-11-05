@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AutomationError } from './automation-error.js';
 
-// 所有呼叫者須先取得同一UI鎖；檔名只由程式產生，不接受任意使用者路徑。
+// 所有呼叫者須先取得同一用途的操作鎖（UI或本機索引）；檔名只由程式產生，不接受任意使用者路徑。
 export async function readPrivateJSON(file, maximum = 1024 * 1024) {
   let handle;
   try {

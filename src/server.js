@@ -21,6 +21,9 @@ import { fileURLToPath } from 'url';
 import { LineAutomation } from './automation/line-automation.js';
 import { desktopTools, desktopToolNames } from './desktop-tools.js';
 import { randomUUID } from 'node:crypto';
+import { AgentServices, localToolNames } from './automation/agent-workflows.js';
+import { toolResult, publicError } from './automation/mcp-result.js';
+import { AutomationError } from './automation/automation-error.js';
 
 // 取得當前模組的目錄路徑
 const __filename = fileURLToPath(import.meta.url);
@@ -28,22 +31,6 @@ const __dirname = path.dirname(__filename);
 // 協定版本直接沿用套件版本，避免安裝包與工具握手顯示不同版號。
 const { version: packageVersion } = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-
-// 只保留人工恢復需要的識別資訊，不把 native 私人內容放進 MCP error data。
-function recoveryDetails(error) {
-  const details = {};
-  if (typeof error.details?.operationId === 'string' && /^[a-f0-9-]{36}$/i.test(error.details.operationId)) {
-    details.operationId = error.details.operationId;
-  }
-  if (error.details?.needsRecovery === true) details.needsRecovery = true;
-  if (typeof error.details?.causeCode === 'string' && /^[A-Z0-9_]{1,64}$/.test(error.details.causeCode)) {
-    details.causeCode = error.details.causeCode;
-  }
-  for (const key of ['completedCount', 'totalCount', 'failedIndex']) {
-    if (Number.isInteger(error.details?.[key]) && error.details[key] >= 0 && error.details[key] <= 10) details[key] = error.details[key];
-  }
-  return details;
-}
 
 // 首次執行時的設定檢查
 async function firstRunSetup() {
@@ -121,7 +108,7 @@ async function firstRunSetup() {
 }
 
 export class LineDesktopMCPServer {
-  constructor(lineAutomation = new LineAutomation(), { transport = 'stdio', sessionId = randomUUID() } = {}) {
+  constructor(lineAutomation = new LineAutomation(), { transport = 'stdio', sessionId = randomUUID(), agentServices = new AgentServices() } = {}) {
     this.server = new Server(
       {
         name: 'line-desktop-mcp',
@@ -135,6 +122,7 @@ export class LineDesktopMCPServer {
     );
 
     this.lineAutomation = lineAutomation;
+    this.agentServices = agentServices;
     this.desktopContext = { transport, sessionId };
     this.setupToolHandlers();
   }
@@ -306,11 +294,11 @@ export class LineDesktopMCPServer {
             );
         }
       } catch (error) {
+        const safe = publicError(error);
         throw new McpError(
           ErrorCode.InternalError,
-          `Error executing tool ${name}: ${error.message}`,
-          typeof error.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(error.code)
-            ? { automationCode: error.code, ...recoveryDetails(error) } : undefined
+          `Error executing tool ${name}: ${safe.message}`,
+          { automationCode: safe.code, ...safe.details }
         );
       }
     });
@@ -319,23 +307,14 @@ export class LineDesktopMCPServer {
   async handleDesktopTool(name, args) {
     try {
       if (this.desktopContext.transport !== 'stdio') {
-        const error = new Error('新增桌面工具目前僅支援本機 stdio 連線。');
-        error.code = 'TRANSPORT_NOT_ALLOWED';
-        throw error;
+        throw new AutomationError('TRANSPORT_NOT_ALLOWED', '新增桌面工具目前僅支援本機 stdio 連線。');
       }
-      const result = await this.lineAutomation.desktopCall(name, args ?? {}, this.desktopContext);
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      const result = localToolNames.has(name)
+        ? await this.agentServices.call(name, args ?? {})
+        : await this.lineAutomation.desktopCall(name, args ?? {}, this.desktopContext);
+      return toolResult(result);
     } catch (error) {
-      // 不回傳 native script、剪貼簿或完整 AX tree，避免錯誤診斷洩漏私人內容。
-      const details = recoveryDetails(error);
-      return {
-        isError: true,
-        content: [{ type: 'text', text: JSON.stringify({ error: {
-          code: typeof error.code === 'string' ? error.code : 'DESKTOP_OPERATION_FAILED',
-          message: typeof error.code === 'string' ? error.message : '桌面操作未完成，請檢查狀態後再繼續。',
-          ...(Object.keys(details).length ? { details } : {}),
-        } }) }],
-      };
+      return { ...toolResult({ error: publicError(error) }), isError: true };
     }
   }
 
@@ -375,20 +354,18 @@ export class LineDesktopMCPServer {
       metadata.complete = false;
       metadata.reasons = [...new Set([...(metadata.reasons || []), 'response_character_limit'])];
     }
-    return {
-      content: [{ type: 'text', text: JSON.stringify({
-        chatName, date: targetDate, messageLimit,
-        history: history.slice(-50000),
-        chatRoomUpdatedAt: now.toLocaleString(), metadata,
-      }, null, 2) }],
-    };
+    return toolResult({
+      chatName, date: targetDate, messageLimit,
+      history: history.slice(-50000),
+      chatRoomUpdatedAt: now.toLocaleString(), metadata,
+    });
   }
 
   async handleSendMessage(args, autoSend = false) {
     const { chatName, message, requestId } = args;
     
     if (requestId !== undefined && this.desktopContext.transport !== 'stdio') {
-      throw Object.assign(new Error('requestId限本機stdio使用'), { code: 'TRANSPORT_NOT_ALLOWED' });
+      throw new AutomationError('TRANSPORT_NOT_ALLOWED', 'requestId限本機stdio使用');
     }
     const result = requestId === undefined
       ? await this.lineAutomation.sendChatMessage(chatName, message, autoSend)
@@ -398,22 +375,13 @@ export class LineDesktopMCPServer {
       ? { status: result.receipt.status, deliveryConfirmed: false,
         observedAt: result.receipt.observedAt } : undefined;
     
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            success: result.success,
-            ...(result.replayed ? { replayed: true } : {}),
-            chatName,
-            message,
-            timestamp: new Date().toISOString(),
-            error: result.error || null,
-            ...(receipt ? { receipt } : {}),
-          }, null, 2),
-        },
-      ],
-    };
+    return toolResult({
+      success: result.success,
+      ...(result.replayed ? { replayed: true } : {}),
+      chatName, message, timestamp: new Date().toISOString(),
+      error: result.error || null,
+      ...(receipt ? { receipt } : {}),
+    });
   }
 
   async handleSendMessageAuto(args) {
@@ -463,8 +431,8 @@ export class LineDesktopMCPServer {
       
       // 添加全局日誌中間件
       app.use((req, res, next) => {
-        console.error(`[${new Date().toISOString()}] ${req.method} ${req.url} from ${req.ip}`);
-        console.error(`Headers:`, JSON.stringify(req.headers));
+        console.error('HTTP request received');
+        // 不記錄headers、token或請求內容。
         next();
       });
       
@@ -528,7 +496,7 @@ export class LineDesktopMCPServer {
             };
             
             transport.onerror = (error) => {
-              console.error(`Transport error:`, error);
+              console.error('Transport error:', publicError(error).code);
             };
             
             // 連接 transport 到 server
@@ -547,11 +515,11 @@ export class LineDesktopMCPServer {
           }
           
         } catch (error) {
-          console.error('Error in endpoint handler:', error);
+          console.error('Error in endpoint handler:', publicError(error).code);
           if (!res.headersSent) {
             res.status(500).json({
               jsonrpc: '2.0',
-              error: { code: -32603, message: error.message },
+              error: { code: -32603, message: publicError(error).message },
               id: null
             });
           }

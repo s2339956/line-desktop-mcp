@@ -1,3 +1,4 @@
+import { agentTools } from './agent-tools.js';
 // 新桌面工具集中定義；執行端仍須驗證參數，schema 不是授權或安全邊界。
 const object = properties => ({ type: 'object', properties, additionalProperties: false });
 const name = { type: 'string', minLength: 1, maxLength: 200 };
@@ -10,6 +11,7 @@ const schema = (properties, required = []) => ({ ...object(properties), required
 const requestId = { type: 'string', pattern: '^[A-Za-z0-9_-]{16,128}$', minLength: 16, maxLength: 128 };
 
 export const desktopTools = [
+  ...agentTools,
   {
     name: 'line_doctor',
     description: '本機健檢與功能相容性報告；預設不編譯helper。probeNative:true可檢查桌面權限，不啟用LINE或讀取內容。',
@@ -126,5 +128,7 @@ export const desktopTools = [
     annotations: { readOnlyHint: false, destructiveHint: false },
   },
 ];
+
+for (const tool of desktopTools) tool.outputSchema = { type: 'object', additionalProperties: true };
 
 export const desktopToolNames = new Set(desktopTools.map(tool => tool.name));

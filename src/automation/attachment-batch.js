@@ -50,7 +50,7 @@ export async function stageAttachment(item, maximumBytes) {
     if (!before.isFile() || before.nlink !== 1 || before.size <= 0 || before.size > maximumBytes) {
       throw new AutomationError('ATTACHMENT_FILE_UNSAFE', '附件須為一般單連結檔案，且未超過批次大小限制');
     }
-    directory = await fs.mkdtemp(path.join(os.tmpdir(), `line-mcp-attachment-${item.sha256}-`));
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), `line-mcp-attachment-${item.sha256 ?? 'descriptor'}-`));
     await fs.chmod(directory, 0o700);
     const file = path.join(directory, path.basename(item.path).normalize('NFC'));
     output = await fs.open(file, 'wx', 0o600);
@@ -72,12 +72,13 @@ export async function stageAttachment(item, maximumBytes) {
       }
     }
     const after = await input.stat();
+    const actualSha256 = digest.digest('hex');
     if (copied !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
-        before.ctimeMs !== after.ctimeMs || digest.digest('hex') !== item.sha256) {
+        before.ctimeMs !== after.ctimeMs || (item.sha256 !== undefined && actualSha256 !== item.sha256)) {
       throw new AutomationError('ATTACHMENT_HASH_MISMATCH', '附件內容與指定SHA256不符或讀取期間改變');
     }
     await output.sync();
-    return { file, directory, sha256: item.sha256, byteCount: copied };
+    return { file, directory, sha256: actualSha256, byteCount: copied };
   } catch (error) {
     if (directory) await fs.rm(directory, { recursive: true, force: true });
     if (error instanceof AutomationError) throw error;

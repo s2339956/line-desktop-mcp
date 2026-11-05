@@ -1,6 +1,6 @@
 # macOS 工具與限制
 
-1.4.0統一入口為 `src/server.js`。stdio提供20工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
+1.5.0統一入口為 `src/server.js`。stdio提供27工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -36,7 +36,7 @@
 
 權限須給真正啟動服務的client／終端機。LINE須登入、未鎖定且視窗可見；延伸螢幕仍受可辨識結構限制。LINE版本、語言、縮放或配置變更可能使工具拒絕操作，不放寬核對作備援。已驗環境見 [TESTING](TESTING.md)。
 
-## 1.4.0 健檢與請求紀錄
+## 1.3.0 健檢與請求紀錄
 
 `line_doctor {probeNative:false}`或`npm run doctor`不編譯、不操作LINE，列出版本與相容性；`probeNative:true`或CLI加`--native`才呼叫原生權限探針，可能首次編譯，完全不讀對話。`uiReadinessConfirmed`僅表示權限與程序基本條件，不取代發送前的完整視窗核對。未驗證版本不放寬indexed profile。
 
@@ -55,3 +55,22 @@
 success:true代表本批均已UI_SUBMITTED。success:false、partial:true代表已驗證的前綴送出，failedIndex為0起算、completedCount是已驗證數量；不會送後項，也不重送前綴。不明則回OPERATION_UNCERTAIN，請用原requestId查line_operation_status，不換新編號自動重送。若清除journal失敗，已保存回條仍有效，狀態會提示needsRecovery。
 
 一般檔案的原生核對依據為已驗NSOpenPanel、完整GoTo路徑、含SHA的私有目錄、唯一檔名Info首行、檔案位元組SHA及唯一Open按鈕。已用獨立標準NSOpenPanel的合成TXT及ZIP核對結構；這不等同已在LINE向真人提交每種檔案。
+
+
+## 1.5.0 本機agent服務
+
+新增 `line_agent_workflow`、`line_describe_attachments` 及 `line_index_import/search/sources/delete/restore` 七工具。統一入口與stdio限制不變；agent服務不取得桌面UI鎖，不啟動LINE或存取剪貼簿。
+
+附件描述只讀明確1–10個絕對路徑，總計100MiB，拒絕symlink、多硬連結與變動中的檔案；回傳索引、SHA256、大小，不回檔案內容或路徑。不執行檔案、解壓或轉換。發送時仍重新核對SHA；雜湊不是發送授權。
+
+索引資料夾與金鑰僅於明確呼叫索引工具時建立，不隨服務啟動或讀聊天建立；只有import會保存文字來源。最多100來源（含可還原移除）、每份100000字元、標籤200字元；保留1–365天，預設30天。文字與標籤、日期、移除狀態一起AES-256-GCM加密，每次隨機nonce，以sourceId作AAD；金鑰32bytes儲於 `~/Library/Application Support/line-desktop-mcp/local-index/.key.json`，金鑰及密文0600、目錄0700。此為本機私有檔案保護，不能抵抗已控制同一帳號的程式，也未使用Keychain。
+
+只使用來源UUID作檔名；每次存取由獨立索引鎖保護並以原子寫入提交。不記錄明文log、不做自動聊天擷取或網路索引。備份與搬移須將整個索引資料夾含金鑰保存在私人位置；遺失金鑰拒絕重建，竄改密文拒絕回報為空結果。不要將資料夾、金鑰或模型回應貼到公開issue。索引鎖不自動搶佔；異常中止留下鎖時，由維護者確認沒有索引程序執行後處理。
+
+`line_index_search`最多200字元／10詞，NFKC小寫literal AND；每2000字元區塊獨立匹配，最多回50筆、預設20，回報matchedChunks／truncated／unknownDateExcluded。日期為使用者提供sourceDate、dateVerifiedByLINE:false；缺日期資料只在沒有日期限制時納入。移除只隱藏搜尋來源，仍計容量；可在到期前還原。到期於下次索引存取刪密文，沒有背景清理，也不承諾儲存媒體安全抹除。
+
+## 維護結構
+
+`server.js`負責協定與transport；`desktop-tools.js`／`agent-tools.js`定義工具schema；`agent-workflows.js`處理靜態流程、明確路徑SHA描述與索引路由。`local-index.js`專管加密來源與有界搜尋，`mcp-result.js`統一回應及公開錯誤白名單。桌面發送留在`desktop-automation.js`及`attachment-batch.js`，呼叫共用Swift原生附件流程；`request-records.js`與`private-json.js`分別處理防重與私有原子檔案。新增功能優先加在對應模組，避免擴大協定層與原生UI程式的職責。
+
+純agent服務測試不呼叫native；桌面協定用合成bridge；原生自檢使用雙重停用UI的獨立程序。MCPB／ZIP只封裝執行來源與使用文件，測試、私人紀錄與診斷工具皆排除。
