@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { LineDesktopMCPServer } from '../src/server.js';
 import { MacOSDesktopAutomation } from '../src/automation/desktop-automation.js';
+import { NativeBridge } from '../src/automation/native-bridge.js';
 import { OperationLock } from '../src/automation/operation-lock.js';
 import { withRequestControl, requestPause } from '../src/automation/request-control.js';
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -120,4 +121,14 @@ test('最後一項可靠完成後才停止仍回完整成功；idle等待可即�
   const pauseController = new AbortController();
   const waiting = withRequestControl({ signal: pauseController.signal }, () => requestPause(10_000));
   pauseController.abort(); await assert.rejects(waiting, { code: 'REQUEST_CANCELLED' });
+});
+
+
+test('冷編譯等待期間停止：編譯可完成，但不再執行native命令', async () => {
+  const compiling = deferred(), ready = deferred(), controller = new AbortController(); let executions = 0;
+  const bridge = new NativeBridge({ execFile() { executions++; } });
+  bridge.ensureBinary = async () => { compiling.resolve(); await ready.promise; return '/synthetic/helper'; };
+  const pending = withRequestControl({ signal: controller.signal }, () => bridge.call('status'));
+  await compiling.promise; controller.abort(); ready.resolve();
+  await assert.rejects(pending, { code: 'REQUEST_CANCELLED' }); assert.equal(executions, 0);
 });

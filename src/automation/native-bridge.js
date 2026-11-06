@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { throwIfCancelled } from './request-control.js';
 import { AutomationError } from './automation-error.js';
 import { validateTextExportProof, validateTextExportReceipt } from './native-text-export.js';
 
@@ -206,6 +207,8 @@ export class NativeBridge {
       throw new AutomationError('NATIVE_DISABLED', '目前環境已停用 LINE native helper');
     }
     const binaryPath = await this.ensureBinary();
+    // 冷編譯不是UI操作；停止訊號送達後，不得再啟動原生動作。
+    throwIfCancelled();
     let output;
     try {
       output = await runExecFile(
