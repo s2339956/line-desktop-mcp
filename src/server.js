@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { AgentServices, localToolNames } from './automation/agent-workflows.js';
 import { toolResult, publicError } from './automation/mcp-result.js';
 import { AutomationError } from './automation/automation-error.js';
-import { withRequestControl, throwIfCancelled } from './automation/request-control.js';
+import { withRequestControl, throwIfCancelled, progressReporter } from './automation/request-control.js';
 
 // 取得當前模組的目錄路徑
 const __filename = fileURLToPath(import.meta.url);
@@ -265,7 +265,9 @@ export class LineDesktopMCPServer {
     });
 
     // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => withRequestControl({ signal: extra.signal }, async () => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => withRequestControl({ signal: extra.signal,
+      progress: progressReporter(request.params._meta?.progressToken, notification => extra.sendNotification(notification)),
+    }, async () => {
       throwIfCancelled();
       const { name, arguments: args } = request.params;
 

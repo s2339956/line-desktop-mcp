@@ -52,6 +52,7 @@ test('native 純策略涵蓋幾何、OCR、overlay、同名列與 live scope 零
   assert.equal(selfTest.ok, true);
   assert.equal(selfTest.result.passed, true);
   assert.deepEqual(Object.keys(selfTest.result.checks).sort(), [
+    'retained-asset-private-descriptor',
     'ax-semantic-calibration-gate',
     'ax-semantic-cf-order-drift',
     'ax-semantic-invalid-present-rejected',

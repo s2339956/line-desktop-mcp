@@ -2,9 +2,14 @@
 const schema = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const sourceId = { type: 'string', format: 'uuid' };
 const date = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: '使用者提供的來源日期，並非LINE驗證時間。' };
-const tool = (name, description, inputSchema, readOnlyHint) => ({ name, description, inputSchema,
-  annotations: { readOnlyHint, destructiveHint: false } });
+const tool = (name, description, inputSchema, readOnlyHint, destructiveHint = false) => ({ name, description, inputSchema,
+  annotations: { readOnlyHint, destructiveHint } });
 export const agentTools = [
+  tool('line_local_maintenance', '本機維護：status只回安全統計；cleanup只清理登錄且已提交滿7天的快照，保留不明及未使用證據；recover_lock核對死亡owner與原生程序後封存鎖，不清操作journal、不重送。', schema({
+    action: { type: 'string', enum: ['status', 'cleanup', 'recover_lock'] },
+    target: { type: 'string', enum: ['ui', 'index', 'assets'] },
+    minimumAgeDays: { type: 'integer', minimum: 7, maximum: 365, default: 7 },
+  }, ['action']), false, true),
   tool('line_agent_workflow', '取得靜態AI agent工作流程範本，只提供步驟，不自動讀取或傳送。', schema({
     workflow: { type: 'string', enum: ['read_summarize', 'draft_reply', 'send_images', 'send_files', 'local_search'] },
   }, ['workflow']), true),

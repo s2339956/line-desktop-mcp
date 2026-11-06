@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { throwIfCancelled } from './request-control.js';
+import { AttachmentStorage } from './attachment-storage.js';
+import { withFinalization, throwIfCancelled } from './request-control.js';
 import { AutomationError } from './automation-error.js';
 import { validateTextExportProof, validateTextExportReceipt } from './native-text-export.js';
 
@@ -187,6 +188,7 @@ export class NativeBridge {
       compileTimeoutMs = 300_000,
       maxBuffer = 2 * 1024 * 1024,
       liveScope = null,
+      assets = new AttachmentStorage(),
     } = options;
     this.execFileInjected = typeof execFile === 'function';
     this.execFile = this.execFileInjected ? execFile : nodeExecFile;
@@ -198,6 +200,7 @@ export class NativeBridge {
     this.maxBuffer = maxBuffer;
     this.liveScope = validateLiveScope(liveScope);
     this.binaryPromise = null;
+    this.assets = assets;
   }
 
   async call(name, args = {}) {
@@ -240,6 +243,7 @@ export class NativeBridge {
     if (!response || typeof response !== 'object' || Array.isArray(response)) {
       throw new AutomationError('NATIVE_PROTOCOL_ERROR', 'LINE native helper 回傳格式不正確');
     }
+    await this.captureTemporaryAsset(name, args, response);
     if (response.ok === false) {
       const nativeError = response.error || {};
       if (
@@ -267,6 +271,28 @@ export class NativeBridge {
       throw new AutomationError('NATIVE_PROTOCOL_ERROR', 'LINE native helper 缺少結構化結果');
     }
     return response.result;
+  }
+
+  async captureTemporaryAsset(name, args, response) {
+    const container = response.ok === true ? response.result : response.error?.details;
+    if (!container || typeof container !== 'object' || Array.isArray(container) || !Object.hasOwn(container, '_temporaryAsset')) return;
+    const asset = container._temporaryAsset;
+    // 無論登錄成功與否都不把原生私有路徑傳至MCP、回條或公開錯誤。
+    delete container._temporaryAsset;
+    try {
+      const source = name === 'sendFile' ? args.fileSha256 : args.imageSha256;
+      if (!['sendFile', 'sendImage'].includes(name) || !asset || asset.sourceSha256 !== source ||
+          asset.kind !== (name === 'sendFile' ? 'native_file' : 'native_image')) throw new Error('asset binding');
+      const result = response.result;
+      const submitted = response.ok === true && result.success === true && result.autoSent === true &&
+        result.chatVerified === true && result.selectedFileVerified === true && result.sourceSha256 === source &&
+        result.receipt?.status === 'UI_SUBMITTED' && result.receipt.deliveryConfirmed === false &&
+        (name === 'sendFile' ? result.fileSha256 === asset.sha256 : result.imageSha256 === asset.sha256);
+      await withFinalization(() => this.assets.capture(asset, submitted ? 'submitted' : 'uncertain'));
+    } catch {
+      // 登錄失敗不抹掉已知提交回條；快照保留，回報固定警示供維護者處理。
+      if (response.ok === true) response.result.localStorageWarning = 'ASSET_TRACKING_FAILED';
+    }
   }
 
   async exportChatText(args) {

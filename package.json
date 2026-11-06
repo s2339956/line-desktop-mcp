@@ -1,6 +1,6 @@
 {
   "name": "line-desktop-mcp",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "macOS LINE Desktop MCP：AI agent 本機文字、圖片與有界歷史整合",
   "main": "./src/server.js",
   "bin": {
@@ -15,7 +15,8 @@
     "setup:mac": "node scripts/setup-mac.mjs --claude",
     "check": "node scripts/check-install.mjs",
     "build:release": "node scripts/build-release.mjs",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "maintenance": "node scripts/maintenance.mjs"
   },
   "keywords": [
     "mcp",
@@ -57,7 +58,8 @@
     "NOTICE.md",
     "CHANGELOG.md",
     "manifest.json",
-    "package-lock.json"
+    "package-lock.json",
+    "scripts/maintenance.mjs"
   ],
   "private": true,
   "repository": {

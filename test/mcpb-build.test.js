@@ -99,7 +99,7 @@ function createFixture() {
   writeFileSync(join(root, 'src', 'private.receipt.json'), 'PRIVATE_RECEIPT_CANARY\n');
   mkdirSync(join(root, 'scripts'), { recursive: true });
   writeFileSync(join(root, 'scripts', 'runtime.js'), 'PRIVATE_DIAGNOSTIC_CANARY\n');
-  for (const entry of ['NOTICE.md', 'CHANGELOG.md', 'Install.command', 'scripts/setup-mac.mjs', 'scripts/check-install.mjs', 'scripts/doctor.mjs', 'docs/AI-AGENTS.md', 'docs/TESTING.md', 'docs/SOURCE.md']) {
+  for (const entry of ['NOTICE.md', 'CHANGELOG.md', 'Install.command', 'scripts/setup-mac.mjs', 'scripts/check-install.mjs', 'scripts/doctor.mjs', 'scripts/maintenance.mjs', 'docs/AI-AGENTS.md', 'docs/TESTING.md', 'docs/SOURCE.md']) {
     writeFileSync(join(root, entry), '# synthetic fixture\n');
   }
   mkdirSync(join(root, 'node_modules', 'fixture-dependency'), { recursive: true });
@@ -162,7 +162,7 @@ test('import builder 不會建包，fixture 建包採固定 allowlist 且不修�
   const result = await buildMCPB({ projectRoot: root, outputFile });
 
   assert.equal(result.outputFile, outputFile);
-  assert.equal(result.fileCount, 19);
+  assert.equal(result.fileCount, 20);
   assert.ok(result.size > 0);
   assert.equal(hashFile(dirtyCanary), dirtyHash);
 
@@ -184,7 +184,7 @@ test('import builder 不會建包，fixture 建包採固定 allowlist 且不修�
       'package-lock.json',
       'package.json',
       'NOTICE.md', 'CHANGELOG.md', 'Install.command',
-      'scripts/setup-mac.mjs', 'scripts/check-install.mjs', 'scripts/doctor.mjs',
+      'scripts/setup-mac.mjs', 'scripts/check-install.mjs', 'scripts/doctor.mjs', 'scripts/maintenance.mjs',
       'docs/AI-AGENTS.md', 'docs/TESTING.md', 'docs/SOURCE.md',
       'src/dirty-canary.txt',
       'src/server.js',

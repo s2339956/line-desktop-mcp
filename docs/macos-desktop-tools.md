@@ -1,6 +1,6 @@
 # macOS 工具與限制
 
-1.5.1統一入口為 `src/server.js`。stdio提供27工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
+1.6.0統一入口為 `src/server.js`。stdio提供28工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -81,3 +81,24 @@ success:true代表本批均已UI_SUBMITTED。success:false、partial:true代表�
 client透過MCP取消當次呼叫時，排隊或尚未開始的附件停止；執行中的原生呼叫不中途強殺，先核對回條，再停止後項。以原requestId查line_operation_status，cancelled代表已知停止，result.completedCount只計可靠提交數，已提交內容不撤回。
 
 結果不明維持uncertain／needsRecovery，不因client停止而視為安全未送出。若最後一項已可靠完成，記錄仍為succeeded。cancelled回條以isError標示，重播只回既有回條；不能換新requestId重送整批。沒有新增逐張確認或圖片取消視窗。停止通知是否送達由client與transport決定，僅關閉client畫面不保證通知已送達。
+
+
+## 1.6.0 進度與維護
+
+附件批次透過client提供的progressToken回報MCP notifications/progress，數字嚴格遞增；prepare／submit完成後才前進，進度不是對方送達證據。通知沒有對話名、檔名、路徑或正文；client不訂閱時不發通知。通知失敗／逾時會停用該次通知，可靠回條仍保存。line_operation_status的result增加phase、preparedCount，completedCount仍只計可靠提交。停止、逾時或斷線後都沿用原requestId查詢，不換ID重送。
+
+line_local_maintenance僅支援本機stdio，所有action都不啟動LINE、不碰鍵鼠、不匯出聊天：
+
+| action | 參數與行為 |
+| --- | --- |
+| status | 無額外參數；回UI／index／assets鎖的安全狀態、pending journal是否存在、快照數量與容量，不回PID、nonce、檔名或路徑。recoverable只是owner已消失的初步判斷，執行仍需核對helper。 |
+| recover_lock | target為ui、index或assets。兩次確認同一owner／目錄未變、owner程序不存在、沒有原生helper，才原子搬移鎖至recovery-evidence封存。原pending journal保留，需另外依已知結果做line_resolve_operation。活程序、PID重用、權限不足、程序探針失敗、不完整owner、symlink一律拒絕。 |
+| cleanup | minimumAgeDays可選7–365，預設7。先取得UI鎖；有pending journal或原生helper即拒絕。僅處理已登錄且可靠UI_SUBMITTED的原生副本，逐檔重新檢查根目錄、UID、0700／0600、單連結、SHA與目錄只有該檔案，再unlink及rmdir；不遞迴刪除。 |
+
+終端機：`npm run maintenance -- status`、`npm run maintenance -- cleanup`、`npm run maintenance -- recover-lock ui`。CLI輸出同樣不含原始程序清單、私人路徑、檔名與owner資訊。
+
+快照登錄在 `~/Library/Application Support/line-desktop-mcp/assets/`，私有紀錄可含本機快照路徑及雜湊，禁止公開上傳。Node輸入副本在helper已製作獨立副本且可靠回條保存後即釋放；尚未開始的項目停止時釋放。可能仍供LINE讀取的原生副本採保守期限及明確cleanup；沒有送達追查，也不承諾長時間離線上傳已完成。prepared／uncertain副本永不由此cleanup清除，舊版／未登錄檔案不掃描、不自動刪除。
+
+原生私有回應中的_temporaryAsset只用於NativeBridge本機登錄，不送入MCP或持久回條。登錄失敗仍保留可靠提交結果，回固定ASSET_TRACKING_FAILED警示；Node釋放失敗可回ASSET_CLEANUP_FAILED。此時部分副本可能未受管理，不能把統計當成整個暫存目錄清單。程序硬中止或原生逾時也可能留下未登錄副本，保留供人工處理。登錄最多2048項，Node預驗於2000項先停止，避免無界擴張。
+
+1.6.0未變更LINE操作的視窗／標題／草稿／實體輸入核對；沒有新增圖片確認／取消介面。實機傳送目前依使用者指示等待，不能將合成測試與原生策略自檢視為所有LINE配置均已驗收。

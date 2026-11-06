@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { AutomationError, assertKnownKeys, assertSafeName } from './automation-error.js';
-import { throwIfCancelled, requestPause } from './request-control.js';
+import { throwIfCancelled, requestPause, reportProgress } from './request-control.js';
 import { validateRequestId, sanitizeReceipt } from './request-records.js';
 
 const MAX_ITEMS = 10;
@@ -107,6 +107,7 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
     async ({ operationId, commit, checkpoint }) => {
       await journal.assertEmpty();
       const staged = [], completed = [];
+      let preparedCount = 0, attemptedCount = 0;
       let retainFiles = false, journalWritten = false;
       const clearJournal = async () => {
         try { await journal.clear(); }
@@ -115,15 +116,18 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
         }); }
       };
       const summary = (success, extra = {}) => ({ success, completedCount: completed.length,
-        totalCount: request.items.length, items: completed, ...extra });
+        totalCount: request.items.length, preparedCount, items: completed, ...extra });
       try {
         let total = 0;
+        await checkpoint(summary(false, { phase: 'preparing' }));
+        await reportProgress({ progress: 0, total: request.items.length * 2 + 1, message: 'Preparing attachments' });
         // 全部先驗檔與解碼，再執行第一個UI操作；不讓後面的壞檔造成可避免的部分提交。
         for (const item of request.items) {
           throwIfCancelled();
           const copy = await stageAttachment(item, Math.min(MAX_TOTAL_BYTES - total,
             kind === 'image' ? MAX_IMAGE_BYTES : MAX_TOTAL_BYTES));
           staged.push(copy); total += copy.byteCount;
+          if (bridge.assets) await bridge.assets.capture({ kind: 'node', directory: copy.directory, file: copy.file, sha256: copy.sha256, sourceSha256: copy.sha256 }, 'prepared');
           if (kind === 'image') {
             const inspected = await bridge.call('inspectImage', { imagePath: copy.file, imageSha256: copy.sha256 });
             if (inspected.sourceSha256 !== copy.sha256 || inspected.uiAccessed !== false ||
@@ -133,6 +137,9 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
               throw new AutomationError('IMAGE_INVALID', '圖片解碼檢查未提供有效證據');
             }
           }
+          preparedCount++;
+          await checkpoint(summary(false, { phase: 'preparing' }));
+          await reportProgress({ progress: preparedCount, total: request.items.length * 2 + 1, message: 'Attachment prepared' });
         }
         throwIfCancelled();
         await journal.write({ operationId, actionHash: request.actionHash, createdAt: new Date().toISOString() });
@@ -141,17 +148,25 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
           throwIfCancelled();
           const item = staged[index];
           try {
-            retainFiles = true;
+            await checkpoint(summary(false, { phase: 'submitting' }));
+            throwIfCancelled();
+            retainFiles = true; attemptedCount = index + 1;
             const result = kind === 'image'
               ? await bridge.call('sendImage', { chatName: request.chatName, imagePath: item.file, imageSha256: item.sha256, autoSend: true })
               : await bridge.call('sendFile', { chatName: request.chatName, filePath: item.file, fileSha256: item.sha256 });
             completed.push(verifiedReceipt(result, item, kind));
-            await checkpoint(summary(false));
+            await checkpoint(summary(false, { phase: 'submitting' }));
+            // helper已建立獨立副本並回條核對成功，Node輸入快照不再被後續LINE讀取。
+            if (bridge.assets && !(await bridge.assets.remove(item.directory).catch(() => false))) {
+              completed.at(-1).localStorageWarning = 'ASSET_CLEANUP_FAILED';
+            }
+            await reportProgress({ progress: request.items.length + completed.length, total: request.items.length * 2 + 1, message: 'Attachment submitted' });
             // 讓本次合成鍵鼠事件離開2秒idle窗口；下一項仍完整核對硬體活動，不自動重試。
             if (index + 1 < staged.length) await settle();
           } catch (error) {
             if (error.code === 'REQUEST_CANCELLED' && error.details?.phase === 'pre_commit') throw error;
             if (error.details?.phase === 'pre_commit') {
+              if (bridge.assets) await bridge.assets.remove(item.directory).catch(() => {});
               if (!completed.length) { retainFiles = false; await clearJournal(); throw error; }
               const partial = summary(false, { partial: true, failedIndex: index, causeCode: codeOf(error) });
               await commit(partial); await clearJournal(); return partial;
@@ -162,18 +177,27 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
             });
           }
         }
-        const result = summary(true, { receipt: { status: 'UI_SUBMITTED', deliveryConfirmed: false, observedAt: new Date().toISOString() } });
-        await commit(result); await clearJournal(); return result;
+        const result = summary(true, { phase: 'completed', receipt: { status: 'UI_SUBMITTED', deliveryConfirmed: false, observedAt: new Date().toISOString() } });
+        await commit(result); await clearJournal();
+        await reportProgress({ progress: request.items.length * 2 + 1, total: request.items.length * 2 + 1, message: 'Batch completed' });
+        return result;
       } catch (error) {
         if (error.code !== 'REQUEST_CANCELLED') throw error;
-        const stopped = summary(false, { cancelled: true, causeCode: 'REQUEST_CANCELLED',
+        const stopped = summary(false, { cancelled: true, phase: 'cancelled', causeCode: 'REQUEST_CANCELLED',
           ...(completed.length ? { partial: true } : {}) });
         await commit(stopped);
         if (journalWritten) await clearJournal();
         return stopped;
       } finally {
         // 任何可能已提交的快照都保留，避免LINE延後讀檔失敗。
-        if (!retainFiles) for (const item of staged) await fs.rm(item.directory, { recursive: true, force: true });
+        for (const [index, item] of staged.entries()) {
+          if (!retainFiles || index >= attemptedCount) {
+            if (bridge.assets) {
+              const removed = await bridge.assets.remove(item.directory).catch(() => false);
+              if (!removed) await fs.rm(item.directory, { recursive: true, force: true });
+            } else await fs.rm(item.directory, { recursive: true, force: true });
+          }
+        }
       }
     }));
 }

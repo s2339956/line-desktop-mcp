@@ -8815,6 +8815,12 @@ func prepareAttachmentForeground() throws {
     guard sameWindow(current, expected) else { throw NativeFailure("WINDOW_CHANGED", "啟用LINE後主視窗已變更") }
 }
 
+// 僅供Node端私有快照登錄；NativeBridge會移除欄位，不能傳入MCP公開回應。
+func retainedAttachmentMetadata(_ asset: ImageSendAsset) -> [String: Any] {
+    ["kind": asset.width == 0 ? "native_file" : "native_image", "directory": asset.directory.path,
+     "file": asset.file.path, "sha256": asset.digest, "sourceSha256": asset.sourceDigest]
+}
+
 func submitAttachment(chat: String, autoSend: Bool, stage: () throws -> ImageSendAsset) throws -> [String: Any] {
     var inputAttempted = false
     var staged: ImageSendAsset?
@@ -8884,13 +8890,18 @@ func submitAttachment(chat: String, autoSend: Bool, stage: () throws -> ImageSen
                 "receipt": ["status": autoSend ? "UI_SUBMITTED" : "IMAGE_SELECTED_NOT_SENT",
                             "deliveryConfirmed": false,
                             "observedAt": ISO8601DateFormatter().string(from: Date())]]
+        receipt["_temporaryAsset"] = retainedAttachmentMetadata(asset)
         if asset.width == 0 { receipt["fileSha256"] = asset.sourceDigest; receipt["byteCount"] = asset.byteCount }
         return receipt
     } catch let failure as NativeFailure {
-        throw forcingPhase(failure, inputAttempted ? "post_commit" : "pre_commit")
+        var details = failure.details
+        details["phase"] = inputAttempted ? "post_commit" : "pre_commit"
+        if inputAttempted, let staged { details["_temporaryAsset"] = retainedAttachmentMetadata(staged) }
+        throw NativeFailure(failure.code, failure.message, details)
     } catch {
-        throw NativeFailure("IMAGE_OPERATION_FAILED", "圖片選入或提交未完成",
-                            ["phase": inputAttempted ? "post_commit" : "pre_commit"])
+        var details: [String: Any] = ["phase": inputAttempted ? "post_commit" : "pre_commit"]
+        if inputAttempted, let staged { details["_temporaryAsset"] = retainedAttachmentMetadata(staged) }
+        throw NativeFailure("IMAGE_OPERATION_FAILED", "圖片選入或提交未完成", details)
     }
 }
 
@@ -9975,6 +9986,13 @@ func refinementSourceAuthorizesIdentity(_ source: String, target: String) -> Boo
 
 func runSelfTests() throws -> [String: Any] {
     var checks: [String: Bool] = [:]
+    let retainedProbe = ImageSendAsset(directory: URL(fileURLWithPath: "/synthetic/asset"),
+        file: URL(fileURLWithPath: "/synthetic/asset/file.bin"), sourceDigest: String(repeating: "a", count: 64),
+        digest: String(repeating: "b", count: 64), width: 0, height: 0)
+    let retainedMetadata = retainedAttachmentMetadata(retainedProbe)
+    checks["retained-asset-private-descriptor"] = Set(retainedMetadata.keys) == Set(["kind", "directory", "file", "sha256", "sourceSha256"]) &&
+        retainedMetadata["kind"] as? String == "native_file" && retainedMetadata["sha256"] as? String == retainedProbe.digest
+
     let imageArgs: [String: Any] = ["chatName": "合成對話", "imagePath": "/tmp/synthetic.png",
                                    "imageSha256": String(repeating: "a", count: 64), "autoSend": false]
     let fileArgs: [String: Any] = ["chatName": "Synthetic", "filePath": "/tmp/synthetic.txt",

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { withOperation } from './request-control.js';
 import { AutomationError } from './automation-error.js';
 import { readPrivateJSON, writePrivateJSON, privateDirectory, syncDirectory } from './private-json.js';
 
@@ -8,7 +9,7 @@ const terminal = new Set(['succeeded', 'partial', 'cancelled', 'failed', 'user_r
 const states = new Set([...terminal, 'started', 'uncertain']);
 const allowedResult = new Set(['success', 'autoSent', 'chatVerified', 'selectedFileVerified',
   'sourceSha256', 'imageSha256', 'width', 'height', 'temporaryFileRetained', 'receipt',
-  'cancelled', 'completedCount', 'totalCount', 'items', 'partial', 'failedIndex', 'causeCode', 'fileSha256', 'byteCount']);
+  'localStorageWarning', 'phase', 'preparedCount', 'cancelled', 'completedCount', 'totalCount', 'items', 'partial', 'failedIndex', 'causeCode', 'fileSha256', 'byteCount']);
 
 export function validateRequestId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(value)) {
@@ -59,7 +60,10 @@ export class RequestReceipts {
   }
 
   async run(requestId, actionHash, work) {
-    if (requestId === undefined) return work({ operationId: crypto.randomUUID(), commit: async () => {} });
+    if (requestId === undefined) {
+      const operationId = crypto.randomUUID();
+      return withOperation(operationId, () => work({ operationId, commit: async () => {} }));
+    }
     const old = await this.read(requestId);
     if (old) {
       if (old.actionHash !== actionHash) throw new AutomationError('REQUEST_CONFLICT', '相同requestId不可更換操作內容');
@@ -74,14 +78,14 @@ export class RequestReceipts {
     await writePrivateJSON(this.file(requestId), record);
     let committed = false, progress;
     try {
-      const result = await work({ operationId: record.operationId, checkpoint: async result => {
+      const result = await withOperation(record.operationId, () => work({ operationId: record.operationId, checkpoint: async result => {
         progress = sanitizeReceipt(result);
         await writePrivateJSON(this.file(requestId), { ...record, result: progress });
       }, commit: async result => {
         await writePrivateJSON(this.file(requestId), { ...record,
           state: result.cancelled === true ? 'cancelled' : result.partial === true ? 'partial' : 'succeeded', result: sanitizeReceipt(result) });
         committed = true;
-      } });
+      } }));
       if (!committed) throw new AutomationError('OPERATION_UNCERTAIN', '操作未持久化完成回條');
       return result;
     } catch (error) {

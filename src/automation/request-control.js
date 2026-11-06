@@ -24,3 +24,28 @@ export function waitForRequest(promise, milliseconds) {
   });
 }
 export const requestPause = milliseconds => waitForRequest(new Promise(() => {}), milliseconds);
+
+export const requestOperation = () => requests.getStore()?.operationId;
+export const withOperation = (operationId, work) => withRequestControl({ ...requests.getStore(), operationId }, work);
+export function progressReporter(token, send) {
+  let previous = -1, unavailable = false;
+  const enabled = typeof token === 'string' || (typeof token === 'number' && Number.isFinite(token));
+  return async ({ progress, total, message }) => {
+    if (!enabled || unavailable || progress <= previous) return;
+    previous = progress;
+    let timer;
+    try {
+      // 進度通知不是提交證據；client寫入卡住或離線不能改變可靠回條。
+      await Promise.race([send({ method: 'notifications/progress', params: { progressToken: token, progress, total, message } }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('progress unavailable')), 500); })]);
+    } catch { unavailable = true; }
+    finally { clearTimeout(timer); }
+  };
+}
+export const reportProgress = async value => {
+  const control = requests.getStore();
+  if (!control?.signal?.aborted) await control?.progress?.(value);
+};
+
+// 已提交後的回條與快照登錄必須完成；此範圍不允許啟動新的UI動作。
+export const withFinalization = work => withRequestControl({ ...requests.getStore(), signal: undefined }, work);

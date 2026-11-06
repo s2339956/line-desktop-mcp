@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AutomationError, assertKnownKeys } from './automation-error.js';
+import { LocalMaintenance } from './local-maintenance.js';
 import { LocalIndex } from './local-index.js';
 import { stageAttachment } from './attachment-batch.js';
 
@@ -42,12 +43,13 @@ export async function describeAttachments(args) {
   return { uiAccessed: false, totalBytes, attachments };
 }
 
-export const localToolNames = new Set(['line_agent_workflow', 'line_describe_attachments', 'line_index_import',
+export const localToolNames = new Set(['line_local_maintenance', 'line_agent_workflow', 'line_describe_attachments', 'line_index_import',
   'line_index_search', 'line_index_sources', 'line_index_delete', 'line_index_restore']);
 export class AgentServices {
-  constructor({ index = new LocalIndex() } = {}) { this.index = index; }
+  constructor({ index = new LocalIndex(), maintenance = new LocalMaintenance() } = {}) { this.index = index; this.maintenance = maintenance; }
   async call(name, args) {
     switch (name) {
+      case 'line_local_maintenance': return this.maintenance.call(args);
       case 'line_agent_workflow': return workflow(args);
       case 'line_describe_attachments': return describeAttachments(args);
       case 'line_index_import': return this.index.import(args);

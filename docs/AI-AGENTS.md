@@ -108,3 +108,12 @@ UI操作前提醒使用者暫停鍵鼠及其他桌面自動化。
 索引本機加密不改變MCP資料流：匯入文字及搜尋結果仍由你選用的AI client／模型處理，請只匯入願意提供給該client的內容。
 
 1.5.1起，附件批次遵守MCP停止訊號；停止後使用原requestId查進度。cancelled／partial／uncertain皆不可自動換ID重送；已開始項目可能完成，未取得可靠結果時仍需恢復。正常發送不增加確認。
+
+
+## 1.6.0 進度與本機維護
+
+client支援MCP progress時，可訂閱當次呼叫的進度；服務只回固定階段與數量，不含附件名或對話內容。沒有通知時，用line_operation_status查result.phase（preparing／submitting／completed／cancelled）、preparedCount與completedCount。phase只表示本機流程，不是送達或已讀。
+
+維護入口為line_local_maintenance。先以 `{"action":"status"}`看安全統計；需要清理本機副本時明確呼叫 `{"action":"cleanup"}`。程序異常中止留下鎖，才用 `{"action":"recover_lock","target":"ui"}`；index與assets鎖同理。工具拒絕時先回報原因，不手刪紀錄、不強殺LINE、不改另一收件對話備援。
+
+快照清理與操作結果恢復不同：recover_lock只解除已證死亡的鎖，pending journal及原requestId防重仍存在。不能因鎖已解除就重送。實機測試對話、附件與執行時機須使用者指定；本版發行時實機驗收仍等待使用者指示。
