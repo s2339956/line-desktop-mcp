@@ -3,7 +3,7 @@
 本倉庫以 [dtwang/line-desktop-mcp](https://github.com/dtwang/line-desktop-mcp) 的1.1.2為基礎，基準commit為 `c138acef5343428a359722f352f6a85ab32a718b`，保留上游commit歷史及MIT授權。
 
 ```sh
-git diff c138acef5343428a359722f352f6a85ab32a718b..v1.5.0
+git diff c138acef5343428a359722f352f6a85ab32a718b..v1.5.1
 ```
 
 保留上游五個工具名稱：三個聊天歷史工具及 `send_message_manual`、`send_message_auto`。macOS改由原生helper與受控桌面流程執行；Windows adapter只保留來源，未在此版驗收。
@@ -12,4 +12,4 @@ macOS衍生版提供stdio桌面工具：狀態、單張圖片、分頁盤點、�
 
 移除舊cliclick安裝流程、未由統一入口使用的獨立HTTP server、診斷用聊天正文log及示範媒體。實機帳號、名稱、路徑、操作紀錄與開發計畫沒有納入本次新增公開commit。
 
-作者與授權見 [NOTICE](../NOTICE.md)、[LICENSE](../LICENSE.md)。上游npm套件仍由原作者維護，本fork的1.5.0從GitHub Releases分發。
+作者與授權見 [NOTICE](../NOTICE.md)、[LICENSE](../LICENSE.md)。上游npm套件仍由原作者維護，本fork的1.5.1從GitHub Releases分發。

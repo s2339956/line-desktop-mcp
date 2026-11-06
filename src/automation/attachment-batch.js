@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { AutomationError, assertKnownKeys, assertSafeName } from './automation-error.js';
+import { throwIfCancelled, requestPause } from './request-control.js';
 import { validateRequestId, sanitizeReceipt } from './request-records.js';
 
 const MAX_ITEMS = 10;
@@ -45,6 +46,7 @@ export function validateBatch(args, kind) {
 export async function stageAttachment(item, maximumBytes) {
   let input, output, directory;
   try {
+    throwIfCancelled();
     input = await fs.open(item.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const before = await input.stat();
     if (!before.isFile() || before.nlink !== 1 || before.size <= 0 || before.size > maximumBytes) {
@@ -58,6 +60,7 @@ export async function stageAttachment(item, maximumBytes) {
     const buffer = Buffer.alloc(64 * 1024);
     let copied = 0;
     while (true) {
+      throwIfCancelled();
       const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
       if (!bytesRead) break;
       copied += bytesRead;
@@ -98,13 +101,13 @@ function verifiedReceipt(result, item, kind) {
 }
 
 export async function sendAttachmentBatch({ args, kind, bridge, lock, records, journal,
-  settle = () => new Promise(resolve => setTimeout(resolve, 2100)) }) {
+  settle = () => requestPause(2100) }) {
   const request = validateBatch(args, kind);
   return lock.withLock(() => records.run(request.requestId, request.actionHash,
     async ({ operationId, commit, checkpoint }) => {
       await journal.assertEmpty();
       const staged = [], completed = [];
-      let retainFiles = false;
+      let retainFiles = false, journalWritten = false;
       const clearJournal = async () => {
         try { await journal.clear(); }
         catch { throw new AutomationError('OPERATION_UNCERTAIN', '回條已保留，但操作紀錄尚未清除；不會重送', {
@@ -117,6 +120,7 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
         let total = 0;
         // 全部先驗檔與解碼，再執行第一個UI操作；不讓後面的壞檔造成可避免的部分提交。
         for (const item of request.items) {
+          throwIfCancelled();
           const copy = await stageAttachment(item, Math.min(MAX_TOTAL_BYTES - total,
             kind === 'image' ? MAX_IMAGE_BYTES : MAX_TOTAL_BYTES));
           staged.push(copy); total += copy.byteCount;
@@ -130,8 +134,11 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
             }
           }
         }
+        throwIfCancelled();
         await journal.write({ operationId, actionHash: request.actionHash, createdAt: new Date().toISOString() });
+        journalWritten = true;
         for (let index = 0; index < staged.length; index++) {
+          throwIfCancelled();
           const item = staged[index];
           try {
             retainFiles = true;
@@ -143,6 +150,7 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
             // 讓本次合成鍵鼠事件離開2秒idle窗口；下一項仍完整核對硬體活動，不自動重試。
             if (index + 1 < staged.length) await settle();
           } catch (error) {
+            if (error.code === 'REQUEST_CANCELLED' && error.details?.phase === 'pre_commit') throw error;
             if (error.details?.phase === 'pre_commit') {
               if (!completed.length) { retainFiles = false; await clearJournal(); throw error; }
               const partial = summary(false, { partial: true, failedIndex: index, causeCode: codeOf(error) });
@@ -156,6 +164,13 @@ export async function sendAttachmentBatch({ args, kind, bridge, lock, records, j
         }
         const result = summary(true, { receipt: { status: 'UI_SUBMITTED', deliveryConfirmed: false, observedAt: new Date().toISOString() } });
         await commit(result); await clearJournal(); return result;
+      } catch (error) {
+        if (error.code !== 'REQUEST_CANCELLED') throw error;
+        const stopped = summary(false, { cancelled: true, causeCode: 'REQUEST_CANCELLED',
+          ...(completed.length ? { partial: true } : {}) });
+        await commit(stopped);
+        if (journalWritten) await clearJournal();
+        return stopped;
       } finally {
         // 任何可能已提交的快照都保留，避免LINE延後讀檔失敗。
         if (!retainFiles) for (const item of staged) await fs.rm(item.directory, { recursive: true, force: true });

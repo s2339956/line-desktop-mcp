@@ -4,11 +4,11 @@ import fs from 'node:fs/promises';
 import { AutomationError } from './automation-error.js';
 import { readPrivateJSON, writePrivateJSON, privateDirectory, syncDirectory } from './private-json.js';
 
-const terminal = new Set(['succeeded', 'partial', 'failed', 'user_reported_submitted', 'abandoned']);
+const terminal = new Set(['succeeded', 'partial', 'cancelled', 'failed', 'user_reported_submitted', 'abandoned']);
 const states = new Set([...terminal, 'started', 'uncertain']);
 const allowedResult = new Set(['success', 'autoSent', 'chatVerified', 'selectedFileVerified',
   'sourceSha256', 'imageSha256', 'width', 'height', 'temporaryFileRetained', 'receipt',
-  'completedCount', 'totalCount', 'items', 'partial', 'failedIndex', 'causeCode', 'fileSha256', 'byteCount']);
+  'cancelled', 'completedCount', 'totalCount', 'items', 'partial', 'failedIndex', 'causeCode', 'fileSha256', 'byteCount']);
 
 export function validateRequestId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(value)) {
@@ -63,7 +63,7 @@ export class RequestReceipts {
     const old = await this.read(requestId);
     if (old) {
       if (old.actionHash !== actionHash) throw new AutomationError('REQUEST_CONFLICT', '相同requestId不可更換操作內容');
-      if (old.state === 'succeeded' || old.state === 'partial') return { ...sanitizeReceipt(old.result), replayed: true };
+      if (['succeeded', 'partial', 'cancelled'].includes(old.state)) return { ...sanitizeReceipt(old.result), replayed: true };
       throw new AutomationError(terminal.has(old.state) ? 'REQUEST_FINISHED' : 'OPERATION_UNCERTAIN',
         '此請求已執行或停止；不會再次傳送，請先查詢操作狀態', {
           operationId: old.operationId, needsRecovery: !terminal.has(old.state),
@@ -79,7 +79,7 @@ export class RequestReceipts {
         await writePrivateJSON(this.file(requestId), { ...record, result: progress });
       }, commit: async result => {
         await writePrivateJSON(this.file(requestId), { ...record,
-          state: result.partial === true ? 'partial' : 'succeeded', result: sanitizeReceipt(result) });
+          state: result.cancelled === true ? 'cancelled' : result.partial === true ? 'partial' : 'succeeded', result: sanitizeReceipt(result) });
         committed = true;
       } });
       if (!committed) throw new AutomationError('OPERATION_UNCERTAIN', '操作未持久化完成回條');

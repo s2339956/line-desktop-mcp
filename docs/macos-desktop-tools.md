@@ -1,6 +1,6 @@
 # macOS 工具與限制
 
-1.5.0統一入口為 `src/server.js`。stdio提供27工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
+1.5.1統一入口為 `src/server.js`。stdio提供27工具；舊HTTP模式只保留五個上游工具，不提供新桌面或圖片功能。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -74,3 +74,10 @@ success:true代表本批均已UI_SUBMITTED。success:false、partial:true代表�
 `server.js`負責協定與transport；`desktop-tools.js`／`agent-tools.js`定義工具schema；`agent-workflows.js`處理靜態流程、明確路徑SHA描述與索引路由。`local-index.js`專管加密來源與有界搜尋，`mcp-result.js`統一回應及公開錯誤白名單。桌面發送留在`desktop-automation.js`及`attachment-batch.js`，呼叫共用Swift原生附件流程；`request-records.js`與`private-json.js`分別處理防重與私有原子檔案。新增功能優先加在對應模組，避免擴大協定層與原生UI程式的職責。
 
 純agent服務測試不呼叫native；桌面協定用合成bridge；原生自檢使用雙重停用UI的獨立程序。MCPB／ZIP只封裝執行來源與使用文件，測試、私人紀錄與診斷工具皆排除。
+
+
+## 1.5.1 附件批次停止
+
+client透過MCP取消當次呼叫時，排隊或尚未開始的附件停止；執行中的原生呼叫不中途強殺，先核對回條，再停止後項。以原requestId查line_operation_status，cancelled代表已知停止，result.completedCount只計可靠提交數，已提交內容不撤回。
+
+結果不明維持uncertain／needsRecovery，不因client停止而視為安全未送出。若最後一項已可靠完成，記錄仍為succeeded。cancelled回條以isError標示，重播只回既有回條；不能換新requestId重送整批。沒有新增逐張確認或圖片取消視窗。停止通知是否送達由client與transport決定，僅關閉client畫面不保證通知已送達。

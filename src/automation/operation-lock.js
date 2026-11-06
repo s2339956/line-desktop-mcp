@@ -4,18 +4,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { AutomationError } from './automation-error.js';
-
-const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-function waitWithin(promise, milliseconds) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), Math.max(0, milliseconds));
-    promise.then(() => {
-      clearTimeout(timer);
-      resolve(true);
-    });
-  });
-}
+import { throwIfCancelled, waitForRequest, requestPause } from './request-control.js';
 
 export class OperationLock {
   constructor({
@@ -34,6 +23,7 @@ export class OperationLock {
   }
 
   async withLock(work) {
+    throwIfCancelled();
     if (this.context.getStore() === this) {
       throw new AutomationError('LOCK_REENTRANT', '同一個 automation instance 不可巢狀取得 UI 鎖');
     }
@@ -43,7 +33,10 @@ export class OperationLock {
     // 把本次 gate 串在前一位之後；逾時 gate 可提早開啟，但後來者仍不會越過目前持鎖者。
     this.queue = previous.then(() => turn);
     const deadline = this.now() + this.timeoutMs;
-    if (!(await waitWithin(previous, this.timeoutMs))) {
+    let ready;
+    try { ready = await waitForRequest(previous.then(() => true), this.timeoutMs); }
+    catch (error) { releaseQueue(); throw error; }
+    if (!ready) {
       releaseQueue();
       throw new AutomationError('LOCK_TIMEOUT', '等待同一 instance 的 LINE UI 操作佇列逾時', {
         timeoutMs: this.timeoutMs,
@@ -52,6 +45,7 @@ export class OperationLock {
     }
     try {
       await this.acquire(Math.max(0, deadline - this.now()));
+      throwIfCancelled();
       return await this.context.run(this, work);
     } finally {
       try {
@@ -65,6 +59,7 @@ export class OperationLock {
   async acquire(timeoutMs = this.timeoutMs) {
     const deadline = this.now() + timeoutMs;
     while (this.now() <= deadline) {
+      throwIfCancelled();
       try {
         await fs.mkdir(this.lockPath, { mode: 0o700 });
         this.ownerNonce = crypto.randomBytes(24).toString('base64url');
@@ -86,7 +81,7 @@ export class OperationLock {
         return;
       } catch (error) {
         if (error?.code !== 'EEXIST') throw error;
-        if (this.now() <= deadline) await sleep(this.pollMs);
+        if (this.now() <= deadline) await requestPause(this.pollMs);
       }
     }
     throw new AutomationError('LOCK_TIMEOUT', '等待 LINE UI 操作鎖逾時', {

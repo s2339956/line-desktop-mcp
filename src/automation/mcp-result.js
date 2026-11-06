@@ -3,7 +3,7 @@ import { AutomationError } from './automation-error.js';
 // JSON text保留舊client相容性；structuredContent提供agent不必再解析文字的穩定物件。
 export function toolResult(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value,
-    ...(value?.partial === true && value.success === false ? { isError: true } : {}) };
+    ...((value?.partial === true || value?.cancelled === true) && value.success === false ? { isError: true } : {}) };
 }
 export function publicError(error) {
   if (!error || typeof error !== 'object') error = {};
